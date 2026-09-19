@@ -125,6 +125,41 @@ def load_pipeline(counter_ckpt: str, separator_ckpt: str,
     return CountThenSeparate(counter, separator).to(device).eval()
 
 
+def _align_to_previous(prev_tail: torch.Tensor, chunk: torch.Tensor) -> torch.Tensor:
+    """Permute ``chunk``'s slots so each one continues the speaker it overlaps.
+
+    A separator has no idea that slot 2 in window 7 holds the same person as slot 4 in
+    window 8, and :class:`CountThenSeparate` re-ranks slots by loudness inside *every*
+    window -- so the moment two talkers trade places in the volume ranking, their slots
+    trade places too. Overlap-adding that unaligned welds half of one voice onto half of
+    another.
+
+    Measured on a 6 s two-tone probe whose talkers swap loudness mid-file: without this
+    step, output track 0 correlated **0.908 with speaker A over the first half and 1.000
+    with speaker B over the second**. The identity of a track changed halfway through the
+    file, which is worse than poor separation because it looks fine in every per-window
+    metric.
+
+    The remedy is the usual one: score every (previous slot, current slot) pair by
+    normalised cross-correlation over the region the two windows share, then take the
+    assignment maximising the total. Surplus slots hold near-silence and correlate with
+    nothing, so they land wherever is left -- correct, since they are empty.
+    """
+    from scipy.optimize import linear_sum_assignment
+
+    def _unit(x: torch.Tensor) -> torch.Tensor:
+        x = x - x.mean(dim=-1, keepdim=True)
+        return x / x.norm(dim=-1, keepdim=True).clamp_min(1e-12)
+
+    sim = torch.einsum("bkt,blt->bkl", _unit(prev_tail), _unit(chunk[..., :prev_tail.shape[-1]]))
+    order = torch.empty(sim.shape[:2], dtype=torch.long, device=chunk.device)
+    for b in range(sim.shape[0]):
+        # The cost matrix is square (slots against slots), so `rows` is always 0..K-1.
+        _, cols = linear_sum_assignment(-sim[b].detach().cpu().numpy())
+        order[b] = torch.as_tensor(cols, device=chunk.device)
+    return torch.gather(chunk, 1, order.unsqueeze(-1).expand(-1, -1, chunk.shape[-1]))
+
+
 @torch.no_grad()
 def separate_long(system: CountThenSeparate, wav: torch.Tensor, *, seg_len: int = SEG_LEN,
                   hop: int | None = None, sr: int = SR) -> PipelineOutput:
@@ -134,6 +169,11 @@ def separate_long(system: CountThenSeparate, wav: torch.Tensor, *, seg_len: int 
     RMS-normalised crops; v0 measured that handing the counter one long block instead of
     overlapping windows took it from a working score to **0 correct out of 300**, because the
     normalisation and the receptive field both assume the training length.
+
+    Windows are **permutation-aligned** to their predecessor before being overlap-added, or
+    a speaker changes track partway through the file -- see :func:`_align_to_previous` for
+    the measurement. The finished tracks are then ranked loudest-first over the whole
+    recording, so the ordering means the same thing it does for a single segment.
 
     The count is taken by averaging the per-window probabilities, which is more stable than
     voting: a window that lands in a pause is uncertain rather than confidently wrong, and
@@ -159,21 +199,37 @@ def separate_long(system: CountThenSeparate, wav: torch.Tensor, *, seg_len: int 
     acc = None
     norm = torch.zeros(1, 1, total, device=wav.device)
     probs = []
+    prev_start, prev_chunk = None, None
     for start in starts:
         block = wav[..., start:start + seg_len]
         rms = block.pow(2).mean(-1, keepdim=True).sqrt().clamp_min(1e-12)
         out = system(block / rms)
         probs.append(out.count_probs)
         chunk = out.sources * rms.unsqueeze(1)
+        if prev_chunk is not None:
+            # The last start is snapped to `total - seg_len`, so the overlap with the
+            # previous window is not always `seg_len - hop`. Measure it.
+            overlap = min(prev_start + seg_len - start, seg_len)
+            if overlap > 1:
+                chunk = _align_to_previous(prev_chunk[..., seg_len - overlap:], chunk)
         if acc is None:
             acc = torch.zeros(chunk.shape[0], chunk.shape[1], total, device=wav.device)
         acc[..., start:start + seg_len] += chunk * window
         norm[..., start:start + seg_len] += window
+        prev_start, prev_chunk = start, chunk
 
     mean_probs = torch.stack(probs).mean(0)
     n_hat = torch.tensor([class_to_n(int(c)) for c in mean_probs.argmax(-1).cpu()],
                          device=wav.device)
     sources = acc / norm.clamp_min(1e-8)
-    power_db = 10.0 * torch.log10(sources.pow(2).mean(-1) + 1e-12)
+
+    # Alignment locked every window to the FIRST window's ranking, which is an arbitrary
+    # three seconds. Rank the finished tracks by their power over the whole recording, in dB
+    # relative to the mixture -- the same convention the single-segment branch returns.
+    mix_power = wav.float().pow(2).mean(dim=-1, keepdim=True)
+    power_db = 10.0 * torch.log10(sources.pow(2).mean(-1) / (mix_power + 1e-12) + 1e-12)
+    slot_order = power_db.argsort(dim=-1, descending=True)
+    sources = torch.gather(sources, 1, slot_order.unsqueeze(-1).expand(-1, -1, total))
+    power_db = torch.gather(power_db, 1, slot_order)
     return PipelineOutput(n_hat=n_hat, count_probs=mean_probs, sources=sources,
                           noise=None, slot_power_db=power_db)

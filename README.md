@@ -57,6 +57,7 @@ CPU in minutes, and nothing neural is allowed to claim victory without beating i
 | `kaggle_02_train_counter` | GPU T4 ×2 | ~3 h | ~3 h |
 | `kaggle_03_train_separator` | GPU T4 ×2 | ~11 h | ~10 h |
 | `kaggle_04_evaluate` | GPU T4 ×2 | ~15 min | ~0.3 h |
+| `kaggle_05_demo` | None | ~2 min | **0** — audio in, one track per person out |
 
 **About 13.3 GPU-hours of a 30 h/week free-tier quota.** Notebooks 00 and 01 cost nothing and
 already produce a defensible result, so the expensive half is optional in the literal sense.
@@ -93,8 +94,18 @@ report before exiting, and `tests/test_scripts_are_reachable.py` fails the build
 bug shape (validated against the original).
 
 ```bash
-python tools/run_all_tests.py     # 6 files, ~45 s, no pytest, no dataset needed
+python tools/run_all_tests.py     # 6 files, ~47 s, no pytest, no dataset needed
 ```
+
+**And one defect of v1's own**, found while wiring up the demo. `separate_long` splits a
+long recording into 3 s windows and overlap-adds them, but slots are re-ranked by loudness
+inside *every* window — so the moment two talkers trade places in the volume ranking, their
+slots trade places, and overlap-add welds half of one voice onto half of another. Measured
+on a two-tone probe: output track 0 correlated **0.908 with speaker A over the first half
+and 1.000 with speaker B over the second**. Per window the separation was flawless; end to
+end a track changed who it held. Windows are now permutation-aligned to their predecessor,
+and `tests/test_separator.py::test_long_recordings_keep_each_speaker_on_one_track` checks
+its own teeth by re-running with the alignment stubbed out and demanding that it fail.
 
 ---
 
@@ -105,7 +116,8 @@ docs/                      runbook, diagnosis, design, data
 src/countsep/
   counter.py               CountCRNN, 0.49 M params, 4 pooling operators (eigen by default)
   separator.py             SepNet: Conv-TasNet, 5 speaker slots + 1 noise slot, NO count head
-  pipeline.py              count -> separate -> keep the N loudest slots
+  pipeline.py              count -> separate -> keep the N loudest slots;
+                           overlap-add for long files, slots aligned across windows
   losses.py                rectangular PIT; hard clamp; per-item silence; no counting term
   features.py baselines.py the 16-scalar CPU counter and the probes that gate every number
   metrics.py               SI-SDR, P-SI-SNR, usable_si_sdri, confusion reporting
@@ -114,7 +126,7 @@ src/countsep/
   mixing.py pack.py noise.py audio.py utils.py checkpoint.py constants.py
 scripts/
   00_pack_sources  01_make_frozen_sets  02_audit_and_baselines  03_tier_a
-  04_train_counter  05_train_separator  06_evaluate  07_interpret  preflight
+  04_train_counter  05_train_separator  06_evaluate  07_interpret  08_infer  preflight
 notebooks/src/*.py         editable originals (percent format, '# %include')
 notebooks/*.ipynb          built by tools/build_notebooks.py -- upload THESE to Kaggle
 tests/                     6 files; structural, numerical and end-to-end

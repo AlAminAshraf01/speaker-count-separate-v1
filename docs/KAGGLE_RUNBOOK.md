@@ -358,6 +358,7 @@ imported — that is why the `cells` check exists.
 | `kaggle_02_train_counter` | GPU T4 ×2 | ~3 h | ~3 h | notebooks 00 + 01 |
 | `kaggle_03_train_separator` | GPU T4 ×2 | ~11 h | ~10 h | notebook 00 |
 | `kaggle_04_evaluate` | GPU T4 ×2 | ~15 min | ~0.3 h | notebooks 00–03 |
+| `kaggle_05_demo` | None | ~2 min | **0** | notebooks 00 + 02 + 03 |
 
 **Total: about 13.3 GPU-hours out of 30 per week.** Notebooks 00 and 01 cost nothing.
 
@@ -369,7 +370,40 @@ imported — that is why the `cells` check exists.
 | day 1 | notebook 02 (counter) | ~3 h |
 | day 2 | notebook 03 (separator) — start it and leave it | ~10 h |
 | day 2 | notebook 04 | ~0.3 h |
+| day 2 | notebook 05 (the demo — listen to it) | 0 |
 | spare quota | the fixed-N=2 control in notebook 03 | ~2.5 h |
+
+---
+
+## Step 9 — Listen to it  *(CPU, ~2 minutes, no GPU quota)*
+
+1. **New Notebook → File → Import Notebook →** `notebooks/kaggle_05_demo.ipynb`
+2. Settings: **Accelerator = None**
+3. **+ Add Input → Notebook Output →** notebooks 00, 02 and 03
+4. **Run All**
+
+Every other notebook reports an average over 1,500 mixtures. This one runs a single file and
+plays it back, because an average cannot be listened to and a viva can. It is also the only
+notebook that uses the system *as a system* — 02 trains the counter, 03 trains the separator,
+04 scores them, and this is the one that joins them into "audio in, one track per person out".
+
+It runs on clips from the frozen test set, so it prints **predicted vs true** rather than
+asking you to trust the number. Two things to look at:
+
+- **The probability bars.** Most of the mass on one class is a model that is right for a
+  reason. Mass spread across 4 and 5 on a 5-speaker clip is a near miss. Mass parked on 1
+  whatever the input is the old project's failure, and you would see it instantly.
+- **The slot power table.** The separator always emits 5 slots and training pushes the unused
+  ones toward −30 dB, so a 3-speaker clip should show a clear cliff after slot 3. A gentle
+  slope instead means the counter and the separator disagree — and you can hear who is right.
+
+To run it on **your own recording**: **+ Add Input → Upload → New Dataset**, then set
+`MY_FILE` in the last cell. Any format, any sample rate.
+
+> Temper your expectations on real audio. The models are trained on **fully overlapped**
+> speech — all N people talking at once for the full three seconds. In a real conversation
+> people take turns, and during a single-speaker stretch "1" is the honest answer even with
+> three people in the room. That is a different problem (diarisation), not a bug.
 
 ---
 

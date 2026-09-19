@@ -174,6 +174,7 @@ and returns how many. In v0 that bug turned +1.2 dB into a reported −8.68 dB.
 | M3 | train the separator | 03 | ~10 h | N=1 SI-SDRi poor → plumbing bug, not a model problem |
 | M4 | final evaluation + interpretability | 04 | ~0.3 h | — |
 | M5 | fixed-N=2 control *(optional)* | 03 | ~2.5 h | the only literature-comparable number |
+| M6 | the demo: one file in, one track per talker out | 05 | **0** | — |
 
 **~13.3 GPU-hours of 30/week.** M0 and M1 cost nothing and already produce a complete,
 defensible counting project — so if the quota runs out, the project does not.

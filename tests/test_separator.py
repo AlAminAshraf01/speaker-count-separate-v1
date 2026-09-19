@@ -156,6 +156,86 @@ def test_pipeline_orders_slots_by_loudness_and_takes_n_hat() -> None:
         "forcing the true count is how separation is measured apart from counting"
 
 
+def test_long_recordings_keep_each_speaker_on_one_track() -> None:
+    """``separate_long`` overlap-adds windows, and slots are re-ranked by loudness in EVERY
+    window -- so the moment two talkers trade places in the volume ranking, their slots trade
+    places, and overlap-add welds half of one voice onto half of another.
+
+    Measured before the fix, on the two-tone probe rebuilt below: output track 0 correlated
+    **0.908 with speaker A over the first half and 1.000 with speaker B over the second**. Per
+    window the separation was flawless; end to end a track changed who it held.
+
+    This check verifies its own teeth. It runs the same probe twice -- once normally, once with
+    the alignment stubbed out -- and demands the second one FAIL. A regression test for a
+    permutation bug that passes with the fix removed is not a test, and this project has
+    already shipped one of those.
+    """
+    import countsep.pipeline as pipeline_mod
+    from countsep.constants import SEG_LEN, SR
+    from countsep.pipeline import CountThenSeparate, separate_long
+
+    class FrequencySplitSeparator(torch.nn.Module):
+        """Splits its input at 300 Hz. Linear, so it survives the RMS rescaling exactly."""
+
+        class cfg:
+            max_n_src = 5
+            predict_noise = True
+
+        def forward(self, x: torch.Tensor) -> dict:
+            spec = torch.fft.rfft(x, dim=-1)
+            freq = torch.fft.rfftfreq(x.shape[-1], d=1.0 / SR).to(x.device)
+            lo = torch.fft.irfft(spec * (freq < 300), n=x.shape[-1], dim=-1)
+            hi = torch.fft.irfft(spec * (freq >= 300), n=x.shape[-1], dim=-1)
+            zero = torch.zeros_like(lo)
+            return {"est": torch.stack([lo, hi, zero, zero, zero, zero], dim=1),
+                    "count_logits": None}
+
+    class AlwaysTwo(torch.nn.Module):
+        def forward(self, x: torch.Tensor) -> dict:
+            return {"logits": torch.tensor([[0.0, 9.0, 0.0, 0.0, 0.0]]).expand(x.shape[0], 5)}
+
+    total = SEG_LEN * 2                                  # 6 s -> three 50 %-overlapped windows
+    t = torch.arange(total, dtype=torch.float64) / SR
+    ramp = torch.linspace(0.0, 1.0, total, dtype=torch.float64)
+    speakers = {                                         # they swap loudness mid-file
+        "A": ((1.0 - ramp) * 0.9 + 0.05) * torch.sin(2 * torch.pi * 200 * t),
+        "B": (ramp * 0.9 + 0.05) * torch.sin(2 * torch.pi * 400 * t),
+    }
+    mix = (speakers["A"] + speakers["B"]).to(torch.float32).unsqueeze(0)
+    system = CountThenSeparate(AlwaysTwo(), FrequencySplitSeparator()).eval()
+
+    def correlation(x: torch.Tensor, y: torch.Tensor) -> float:
+        x, y = x - x.mean(), y - y.mean()
+        scale = x.norm() * y.norm()
+        return abs(float(x @ y / scale)) if float(scale) > 1e-12 else 0.0
+
+    def every_track_holds_one_speaker() -> bool:
+        """True when no output track changes which speaker it carries."""
+        tracks = separate_long(system, mix).sources[0].double()
+        half = total // 2
+        for track in tracks[:2]:
+            halves = []
+            for piece in (slice(0, half), slice(half, total)):
+                scores = {k: correlation(track[piece], v[piece]) for k, v in speakers.items()}
+                halves.append(max(scores, key=scores.get))
+                if scores[halves[-1]] < 0.7:
+                    return False
+            if halves[0] != halves[1]:
+                return False
+        return True
+
+    assert every_track_holds_one_speaker(),         "a speaker changed output track partway through the file"
+
+    # A global reordering of tracks is allowed -- "loudest first" is the contract, and it is
+    # asserted separately. What must not happen is a track changing hands mid-recording.
+    original = pipeline_mod._align_to_previous
+    try:
+        pipeline_mod._align_to_previous = lambda prev_tail, chunk: chunk
+        assert not every_track_holds_one_speaker(),             "this test cannot detect the bug it exists for: it passes with alignment removed"
+    finally:
+        pipeline_mod._align_to_previous = original
+
+
 if __name__ == "__main__":
     sys.exit(run_checks({
         "hard clamp has no gradient above tau": test_hard_clamp_has_no_gradient_above_tau,
@@ -164,4 +244,5 @@ if __name__ == "__main__":
         "the separator has no count head": test_the_separator_has_no_count_head,
         "separator loss runs without a count head": test_separator_loss_runs_without_a_count_head,
         "pipeline orders slots and takes n_hat": test_pipeline_orders_slots_by_loudness_and_takes_n_hat,
+        "long audio keeps each speaker on one track": test_long_recordings_keep_each_speaker_on_one_track,
     }))
