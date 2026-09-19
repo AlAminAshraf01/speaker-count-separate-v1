@@ -102,9 +102,12 @@ def main() -> int:
     ap.add_argument("--n_list", nargs="+", type=int, default=[1, 2, 3, 4, 5])
     ap.add_argument("--per_class", type=int, default=300)
     ap.add_argument("--seg_seconds", type=float, default=3.0)
-    ap.add_argument("--p_clean", type=float, default=0.2)
-    ap.add_argument("--gain_db", nargs=2, type=float, default=[-5.0, 5.0])
-    ap.add_argument("--snr_db", nargs=2, type=float, default=[0.0, 20.0])
+    # These default to DEFAULT_MIXING, resolved below -- NOT to a literal. Hard-coding
+    # v0's (-5, 5) / (0, 20) / 0.2 here is what made this script audit a task nobody
+    # trains on, and print a "bar" 11.5 points away from the one 03_tier_a.py measures.
+    ap.add_argument("--p_clean", type=float, default=None)
+    ap.add_argument("--gain_db", nargs=2, type=float, default=None)
+    ap.add_argument("--snr_db", nargs=2, type=float, default=None)
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--max_depth", type=int, default=3)
     ap.add_argument("--out", default="/kaggle/working/audit")
@@ -115,6 +118,11 @@ def main() -> int:
 
     from countsep.baselines import (interpret_probe, naive_scores, probe,
                                     speaker_disjointness, wilson_interval)
+    from countsep.datasets import DEFAULT_MIXING
+
+    p_clean = DEFAULT_MIXING["p_clean"] if args.p_clean is None else args.p_clean
+    gain_db = tuple(args.gain_db or DEFAULT_MIXING["gain_db_range"])
+    snr_db = tuple(args.snr_db or DEFAULT_MIXING["snr_db_range"])
     from countsep.pack import SourceStore
     from countsep.utils import json_dump_atomic
 
@@ -155,21 +163,30 @@ def main() -> int:
 
     # ---------------------------------------------------------------- 2. render + featurise
     banner(f"2. rendering mixtures from {args.probe_split!r}")
+    # Without noise_kinds this falls back to ALL_KINDS, which includes BABBLE -- and
+    # babble is 4-8 real talkers, so a clip labelled N=1 would actually contain nine
+    # people. The label, not just the difficulty, would be wrong. 03_tier_a.py passes
+    # this; for months this script did not, and audited a different task in silence.
     store, bank = build_store_and_bank(store_root, args.probe_split,
+                                       noise_kinds=DEFAULT_MIXING["noise_kinds"],
                                        noise_store=resolve(args.noise_store))
+    if any("babble" in k for k in bank.kinds):
+        print("REFUSING: the noise bank still offers babble; the count labels would be "
+              "wrong for every clip that draws it.", file=sys.stderr)
+        return 2
     total = len(args.n_list) * args.per_class
     print(f"  {total} mixtures, N in {args.n_list}, {args.seg_seconds:g} s at 8 kHz, "
-          f"p_clean={args.p_clean}, gain {args.gain_db} dB, SNR {args.snr_db} dB")
+          f"p_clean={p_clean}, gain {list(gain_db)} dB, SNR {list(snr_db)} dB")
     print(f"  noise kinds available: {bank.kinds}")
 
     raw_rows, y, speakers_per_mix = collect(
         store, bank, args.n_list, args.per_class, sr_seg, np.random.default_rng(args.seed),
-        mitigated=False, p_clean=args.p_clean,
-        gain_db_range=tuple(args.gain_db), snr_db_range=tuple(args.snr_db))
+        mitigated=False, p_clean=p_clean,
+        gain_db_range=gain_db, snr_db_range=snr_db)
     mit_rows, y2, _ = collect(
         store, bank, args.n_list, args.per_class, sr_seg, np.random.default_rng(args.seed),
-        mitigated=True, p_clean=args.p_clean,
-        gain_db_range=tuple(args.gain_db), snr_db_range=tuple(args.snr_db))
+        mitigated=True, p_clean=p_clean,
+        gain_db_range=gain_db, snr_db_range=snr_db)
     assert np.array_equal(y, y2), "the two renderings disagree on labels"
     print(f"  done: {len(raw_rows)} unmitigated + {len(mit_rows)} mitigated feature rows")
 
