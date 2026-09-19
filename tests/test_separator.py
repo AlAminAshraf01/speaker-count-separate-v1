@@ -103,6 +103,35 @@ def test_global_layer_norm_survives_autocast() -> None:
     rel = (hi - lo).abs().max() / hi.std().clamp_min(1e-9)
     assert float(rel) < 0.5, f"gLN diverges under autocast by {float(rel):.2f}x its own spread"
 
+    # ---- the part with teeth -------------------------------------------------------
+    # Everything above passes with the v0 defect fully reintroduced. The eps assertion
+    # tests the CONSTANT, not the forward; the divergence check uses var ~ 900, which
+    # bf16 carries trivially. Neither reaches the regime where the bug lived.
+    #
+    # This does. x ~ 1e-4 is a normal fp16 number, but x**2 ~ 1e-8 is below fp16's
+    # smallest subnormal (~6e-8), so a variance computed in fp16 is EXACTLY 0.0 -- and
+    # v0's eps=1e-8 is exactly 0.0 there too, so the division is 0/0 and the output is
+    # NaN. fp32 statistics with MODEL_EPS=1e-5 stay finite. The two implementations are
+    # separated by finiteness rather than by a tolerance anyone has to choose.
+    def defective(module, tensor):          # v0, verbatim: ambient precision, eps=1e-8
+        mean = tensor.mean(dim=(1, 2), keepdim=True)
+        var = tensor.var(dim=(1, 2), keepdim=True, unbiased=False)
+        return module.gamma * ((tensor - mean) / torch.sqrt(var + 1e-8)) + module.beta
+
+    underflows = (torch.randn(2, 32, 256) * 1e-4).half()
+    with torch.no_grad():
+        assert torch.isfinite(norm(underflows)).all(), (
+            "gLN produced non-finite output on an fp16 input whose variance underflows -- "
+            "the statistics are NOT being computed in fp32")
+        assert not torch.isfinite(defective(norm, underflows)).all(), (
+            "this check cannot detect the bug it exists for: the v0 implementation passes it")
+
+        # var is exactly 0: without a surviving eps this is 0/0. Output must be beta.
+        flat = torch.full((2, 32, 256), 0.7)
+        assert torch.isfinite(norm(flat)).all(), "constant input made gLN non-finite; eps is gone"
+        assert torch.allclose(norm(flat), norm.beta.expand(2, 32, 256), atol=1e-6), (
+            "constant input must normalise to exactly beta")
+
 
 def test_the_separator_has_no_count_head() -> None:
     """The whole point of v1: one job per model."""

@@ -123,6 +123,17 @@ competing for the optimiser.
 a balanced batch gave the N=1 item 40 % of the second-largest gradient term and the N=5 item
 nothing. Now a per-item average.
 
+**The normalisations were also 55 % of the memory.** The readable form of gLN --- subtract,
+divide, scale, shift --- retains *three* full-size tensors per call, and there are 49 of them.
+Measured at the paper preset and batch 12: **18.05 GiB** of saved activations against a
+**14.56 GiB** T4, of which gLN was **10.02 GiB**. The first real run OOMed in TCN block 19 of
+24 on the first batch. Because `mean`/`var` reduce over channels *and* time they are
+`(B, 1, 1)`, while `gamma`/`beta` are `(1, C, 1)`, so the whole affine folds into `(B, C, 1)`
+coefficients applied with one `addcmul` --- exact algebra, one full-size tensor instead of
+three. Activations fall to **11.33 GiB** (batch 12 fits with ~1.77 GiB spare, ceiling 13) and
+the forward gets *faster*, 30.6 -> 25.1 ms. Gradient checkpointing was measured as the
+alternative --- 11.7x less memory for +30 % compute --- and is not needed at this batch.
+
 **The normalisations defeated autocast.** `GlobalLayerNorm` is hand-written because Conv-TasNet
 normalises over channels *and* time, which `nn.LayerNorm` does not do — that part is legitimate.
 What was not is that autocast's fp32 promotion list covers `layer_norm` and not a hand-rolled

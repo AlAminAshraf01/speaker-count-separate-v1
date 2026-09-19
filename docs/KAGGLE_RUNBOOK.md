@@ -341,6 +341,7 @@ bars overlap is too cautious here and will call a real difference a tie.
 | `0 sources` for N=3,4,5 in the eval table | you passed `--limit` | it is stratified now, but a very small limit still starves the rare classes |
 | `shared speakers: 7` (not 0) | train and test overlap | rebuild the store; do not train on it |
 | Session killed at 12 h | normal Kaggle limit | **Run All** again; training resumes |
+| `torch.OutOfMemoryError` in notebook 03 | the separator needs more than the card has | your clone is stale — the fix is in `GlobalLayerNorm`. Re-run so the bootstrap pulls it. If it still OOMs, set `BATCH_SIZE = 8` **and** `STEPS_PER_EPOCH = 1500`, which keeps the mixtures-per-epoch and the GPU budget identical |
 | `refusing to freeze ... BABBLE` | you asked for babble noise | do not. Babble is 4–8 real talkers, so the count label would be wrong |
 
 ### Changing anything in the code

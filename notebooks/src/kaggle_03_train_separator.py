@@ -78,6 +78,26 @@ run(f"python scripts/preflight.py --for train --store {STORE}"
 # The single most useful thing you can do before a long training run is work out how many
 # epochs actually fit. Do the arithmetic now, not at hour eleven.
 
+# ### Why batch 12 fits, and what to do if it does not
+#
+# This notebook OOMed on a T4 the first time it ran. Not marginally: one forward+backward
+# retained **18.05 GiB** of activations against a **14.56 GiB** card, so batch 12 was never
+# going to fit. 55 % of that was `GlobalLayerNorm`, which saved three full-size tensors per
+# call across 49 instances. Folding its affine into `(B, C, 1)` coefficients cut the model to
+# **11.33 GiB** — batch 12 now fits with about **1.77 GiB** to spare, and it is slightly
+# faster besides.
+#
+# If you still hit `torch.OutOfMemoryError`, your clone is older than that fix — re-run so the
+# bootstrap pulls it. Only if it persists, drop to `BATCH_SIZE = 8` **and** raise
+# `STEPS_PER_EPOCH` to `1500`. Take both: this script sizes an epoch as
+# `steps_per_epoch * batch_size` mixtures, so changing the batch alone quietly cuts your
+# training data by a third. Together they hold the epoch, the data and the GPU budget fixed.
+#
+# Do **not** reach for `--amp`. It looks like a free 2x and measures 1.39x, because under
+# autocast `x.float()` inside gLN becomes a real widening copy — so 50 % of the peak stays
+# fp32 no matter what. It would not reach batch 12 anyway, and it reopens the precision
+# failure this version was rebuilt to close.
+
 # %%
 EPOCHS = 30
 STEPS_PER_EPOCH = 1000
