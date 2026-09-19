@@ -262,11 +262,21 @@ def main() -> int:
 
     # ---------------------------------------------------------------- verdict
     banner("result")
+    # Score the checkpoint that SHIPS, not whatever weights are in memory when the loop
+    # ends. best.pt is what notebook 04 loads, and the last epoch is usually not it --
+    # this run ended at 83.3% with its best at 85.1%. Printing one headline beside
+    # another model's confusion breakdown invites a report sentence that is not true of
+    # any single checkpoint.
+    best_path = os.path.join(ckpt_dir, "best.pt")
+    if os.path.exists(best_path):
+        load_checkpoint(best_path, model=model)
+        print(f"  scoring {best_path}, the checkpoint notebook 04 will load")
+        print()
     final = evaluate(model, dev_loader, device, amp=args.amp, n_classes=N_CLASSES)
     agreement = check_precision_agreement(model, dev_loader, device, amp=args.amp)
     print(f"  best val accuracy ....... {best:.1%}")
-    print(f"  final MAE ............... {final['mae']:.3f}")
-    print(f"  final off-by-one ........ {final['off_by_one']:.1%}")
+    print(f"  MAE ..................... {final['mae']:.3f}")
+    print(f"  off-by-one .............. {final['off_by_one']:.1%}")
     print(f"  per-class recall ........ "
           + "  ".join(f"N={n}:{r:.0%}" for n, r in zip(N_LIST, final['per_class_recall'])))
     print(f"  fp32/autocast agreement . {agreement:.1%} (end of training)")
@@ -280,7 +290,7 @@ def main() -> int:
 
     report = {"code_version": code_version(), "pooling": args.pooling, "amp": args.amp,
               "best_val_accuracy": best, "bar": args.bar, "beats_bar": bool(best > args.bar),
-              "final": {k: v for k, v in final.items() if k != "snr_pairs"},
+              "best_checkpoint": {k: v for k, v in final.items() if k != "snr_pairs"},
               "precision_agreement": agreement, "history": history,
               "mixing": DEFAULT_MIXING, "params": model.count_parameters()}
     path = os.path.join(out_dir, "train_report.json")

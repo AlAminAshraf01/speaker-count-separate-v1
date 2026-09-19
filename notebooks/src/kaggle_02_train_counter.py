@@ -167,6 +167,20 @@ print(f"best dev accuracy ....... {report['best_val_accuracy']:.1%}")
 print(f"the bar (Tier A) ........ {report['bar']:.1%}")
 print(f"beats the bar ........... {report['beats_bar']}")
 print(f"fp32/fp16 agreement ..... {report['precision_agreement']:.1%}")
+
+# The per-N breakdown, not just the average. 85 % overall could be 95 % at N=1 and
+# 55 % at N=5, and those are different projects -- the shape is what tells you which
+# half to work on next, and it is 9,000 log lines up otherwise.
+best = report.get("best_checkpoint", {})
+recall = best.get("per_class_recall")
+if recall:
+    print(f"MAE ..................... {best['mae']:.3f}")
+    print(f"off-by-one .............. {best['off_by_one']:.1%}   "
+          f"(100 % means every error is a neighbour)")
+    print("per-N recall ............ "
+          + "  ".join(f"N={n}:{r:.0%}" for n, r in zip(range(1, 6), recall)))
+    worst = min(range(len(recall)), key=lambda i: recall[i]) + 1
+    print(f"weakest class ........... N={worst} at {min(recall):.0%}")
 print()
 print("Nothing here is a final number. These are DEV numbers, used to choose things.")
 print("The test set is opened once, in notebook 04, and not before.")
