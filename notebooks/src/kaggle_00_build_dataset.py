@@ -139,7 +139,8 @@ print("then put them in the repo's data/ folder and commit them.")
 # measure afterwards is meaningless.
 
 # %%
-run(f"python scripts/preflight.py --for cpu --store {STORE}")
+run(f"python scripts/preflight.py --for cpu --store {STORE}"
+    f" --cells_src {CELLS_SRC} --cells_sha {CELLS_SHA}")
 
 # %% [markdown]
 # ## Now: Save Version → Save & Run All (Commit)

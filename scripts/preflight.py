@@ -146,7 +146,10 @@ def check_store(args) -> Row:
         return ("store", "FAIL", f"{root}: {exc}")
     if not sizes:
         return ("store", "FAIL", f"{root} has no packed splits")
-    detail = ", ".join(f"{k}: {u} utts/{s} spk" for k, (u, s) in sizes.items())
+    # "target" is load-bearing: assign_roles reserves babble_frac (0.2) of the speakers
+    # for babble only, so this is ~80 % of what 00_pack_sources reports as packed. Two
+    # correct numbers with the same label read as a packing failure.
+    detail = ", ".join(f"{k}: {u} target utts/{s} spk" for k, (u, s) in sizes.items())
     return ("store", "OK", f"{root}  ({detail})")
 
 
