@@ -258,7 +258,7 @@ def main() -> int:
     print(f"  best naive predictor .................. "
           f"{max(r['accuracy'] for r in naive.values()):>6.1%}")
     print(f"  Tier A, speaker-disjoint K-fold ....... {best['accuracy']:>6.1%}  <-- BEAT THIS")
-    print(f"\n  Pass this to 04_train.py as --bar {best['accuracy']:.3f}")
+    print(f"\n  Notebook 02 reads this from tier_a_report.json by itself; the value is --bar {best['accuracy']:.3f}")
     print(f"\nreport -> {path}")
     if model_path:
         print(f"model  -> {model_path}")
