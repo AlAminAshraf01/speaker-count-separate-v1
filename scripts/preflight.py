@@ -193,9 +193,14 @@ def check_precision(args) -> Row:
     try:
         import torch
 
-        from countsep.model import build_model, precision_agreement, probe_batch
+        from countsep.counter import build_model, precision_agreement, probe_batch
     except ImportError as exc:
-        return ("precision", "WARN", f"cannot check ({exc})")
+        # FAIL, not WARN. This check is the reason the project was rebuilt, and it spent
+        # its whole life reporting 'cannot check (No module named countsep.model)' because
+        # the module was renamed to counter.py. A WARN scrolls past; that is precisely how
+        # v0's leak audit managed to do nothing for months while exiting 0.
+        return ("precision", "FAIL", f"cannot import the counter ({exc}) -- this check"
+                " is the one this project exists for, so a broken import is a failure")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = build_model().to(device)

@@ -165,6 +165,44 @@ def test_scripts_exit_with_main() -> None:
             f"actually fails the notebook cell.")
 
 
+def test_every_countsep_import_resolves() -> None:
+    """Catch a module rename that left an importer behind.
+
+    ``preflight.py`` imported ``countsep.model`` for its precision gate. v1 renamed that
+    file to ``counter.py``, so the import raised, the handler turned it into a WARN, and
+    the check THE PROJECT WAS REBUILT AROUND silently never ran -- printing
+    ``WARN precision cannot check (No module named 'countsep.model')`` on every training
+    run while eight other rows said OK.
+
+    That is v0's leak audit again in a different costume: a check that reports success at
+    doing nothing. A rename is found by the thing that imports, not by the thing renamed,
+    so this walks every import statement instead of trusting anybody to remember.
+    """
+    import ast
+
+    package = os.path.join(REPO_ROOT, "src", "countsep")
+    modules = {f[:-3] for f in os.listdir(package) if f.endswith(".py")}
+    stale = []
+    for folder in ("scripts", "tests", "tools"):
+        directory = os.path.join(REPO_ROOT, folder)
+        for name in sorted(os.listdir(directory)):
+            if not name.endswith(".py"):
+                continue
+            with open(os.path.join(directory, name), "r", encoding="utf-8") as fh:
+                tree = ast.parse(fh.read())
+            for node in ast.walk(tree):
+                targets = []
+                if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("countsep."):
+                    targets.append(node.module)
+                elif isinstance(node, ast.Import):
+                    targets += [a.name for a in node.names if a.name.startswith("countsep.")]
+                for target in targets:
+                    if target.split(".")[1] not in modules:
+                        stale.append(f"{folder}/{name}:{node.lineno} -> {target}")
+
+    assert not stale, "these import countsep modules that do not exist: " + "; ".join(stale)
+
+
 if __name__ == "__main__":
     sys.exit(run_checks({
         "every script has a main": test_every_script_has_a_main,
@@ -172,5 +210,6 @@ if __name__ == "__main__":
         "no function defined inside main": test_no_function_is_defined_inside_main,
         "no unreachable code after a return": test_no_unreachable_code_after_a_return,
         "audit script verifies its own output": test_audit_script_verifies_its_own_output,
+        "every countsep import resolves": test_every_countsep_import_resolves,
         "scripts exit with main()": test_scripts_exit_with_main,
     }))
