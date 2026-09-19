@@ -54,8 +54,13 @@ loudest real speakers rather than a scrambled set.
 convs → BiGRU → **pooling** → 5-way softmax.
 
 **The pooling operator is the single most important choice**, worth 8 accuracy points — more
-than the architecture, the front end and the schedule combined. Measured on identical
-speaker-disjoint data, 10 CPU epochs, changing *only* that layer:
+than the architecture, the front end and the schedule combined. Changing *only* that layer,
+10 CPU epochs on identical speaker-disjoint data:
+
+> **These four rows are a synthetic speech proxy, not LibriSpeech.** They rank the operators
+> against each other, which is what they were run for, and the ranking is the claim. Their
+> absolute values are not comparable to the 57.8 % below, which is real audio. Notebook 02
+> replaces them.
 
 | pooling | params | accuracy | MAE |
 |---|---|---|---|
@@ -63,7 +68,12 @@ speaker-disjoint data, 10 CPU epochs, changing *only* that layer:
 | `attentive` (Okabe et al.) | 0.525 M | 67.5 % | 0.422 |
 | `covariance` (log-Euclidean, 560-d) | 0.551 M | **20.0 % — collapsed** | 2.000 |
 | **`eigen`** (spectrum + effective rank, 65-d) — default | **0.488 M** | **74.4 %** | **0.305** |
-| *hand-crafted features + GBM (the bar)* | — | *69.3 %* | — |
+| *hand-crafted features + GBM, same proxy* | — | *69.3 %* | — |
+
+**The bar the counter actually has to clear is 57.8 %**, measured on real LibriSpeech by
+`03_tier_a.py` — speaker-disjoint 5-fold, 7,500 mixtures, 201 talkers, MAE 0.480, fold spread
+±1.5 points, six of six grid configurations inside one point of each other. Notebook 02 reads
+that value out of `tier_a_report.json`; nothing is typed by hand.
 
 **The rank hypothesis was right; the obvious implementation of it was wrong.** Both
 `covariance` and `eigen` read the same channel covariance. The full vectorisation hands the
@@ -76,9 +86,15 @@ occupy, and a counter should be invariant to that. Eigen**values** say *how many
 carry energy — that is the count. Discarding the eigenvectors is the inductive bias, not a
 shortcut. `eigen` is also the smallest and fastest of the four.
 
-**How much to claim:** 74.4 % has a Wilson interval of [71.7, 76.9] and the tree's is
-[66.5, 72.0] — they overlap by 0.3 points. Overlapping intervals are conservative for paired
-data and McNemar would likely separate them, but until that is run the word is *promising*.
+**How much to claim: nothing yet.** On the proxy, `eigen`'s 74.4 % and the tree's 69.3 % had
+Wilson intervals of [71.7, 76.9] and [66.5, 72.0] — overlapping by 0.3 points. Both numbers
+have since been superseded on one side: the tree scores **57.8 %** on real audio, and `eigen`
+has not been run there at all. So the honest statement is that the operator ranking held on a
+proxy and the real comparison is pending, not that `eigen` beats the tree.
+
+When both numbers do exist, compare them with **McNemar** rather than by checking whether the
+intervals overlap. Both models score the identical clips, so the test is paired; overlapping
+intervals are too conservative for paired data and will call a real difference a tie.
 
 ---
 
@@ -188,7 +204,7 @@ Cut order: M5, M3, M2. The project stays coherent at every step; it just narrows
 | risk | mitigation |
 |---|---|
 | **Separation lands far below 14.76 dB** | It will — that number is 200 epochs on train-360. Report epochs and training set beside it. Run M5 for a comparable number. |
-| **The counter does not beat the 69.3 % tree** | That is a *result*, not a failure, and an interesting one. M1 already shipped. |
+| **The counter does not beat the 57.8 % tree** | That is a *result*, not a failure, and an interesting one. M1 already shipped. |
 | **fp16/fp32 divergence returns** | Preflight refuses to train on it; `tests/test_counter.py` and `tests/test_separator.py` assert it. |
 | **An audit that silently does nothing** | Scripts verify their own report file; a structural test fails the build on unreachable code. |
 | **4 vCPU cannot feed a T4** with on-the-fly mixing | The counter's batch is ~7× smaller than the separator's (`want="count"`). If the loader still starves the GPU, pre-render one epoch. |

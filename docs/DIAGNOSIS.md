@@ -21,11 +21,15 @@ reasoning only are marked *inference*.
 | chance | 20.0 % |
 | **CountSepNet count head, fp32 (5.30 M params, 10.6 GFLOP/s of audio)** | **20.00 %** |
 | CountSepNet count head, fp16 autocast, same checkpoint | 44.9 % |
-| 16 hand-crafted scalars + a gradient-boosted tree (measured here, §5) | **69.3 %** |
+| 16 hand-crafted scalars + a gradient-boosted tree (measured here, §5) | **57.8 %** |
 
 A 5.3-million-parameter network scored *exactly chance* while a decision-tree ensemble over
-sixteen numbers you can compute in numpy scored 69 %. The task is not the problem. Nothing
+sixteen numbers you can compute in numpy scored 58 %. The task is not the problem. Nothing
 about the counting failure is evidence that counting is hard.
+
+Both rows are real LibriSpeech: the 20.00 % is v0's own trained checkpoint on its test set,
+the 57.8 % is a speaker-disjoint 5-fold over 7,500 mixtures from 201 talkers (MAE 0.480,
+fold spread ±1.5 points).
 
 The fp32 model answered **"1 speaker" for 1445 of 1500 mixtures**.
 
@@ -284,6 +288,10 @@ Train on `train-100` speakers, test on `dev` speakers, 3500 / 1100 mixtures, pro
 | learned linear-STFT CRNN, 0.476 M params, 14 CPU epochs | 67.1 % |
 | chance | 20.0 % |
 
+> **Proxy numbers.** This comparison was run on a synthetic speech proxy, not LibriSpeech.
+> On real audio the same feature set and the same speaker-disjoint protocol give **57.8 %**,
+> so read the two rows against each other, not as absolutes.
+
 The CRNN is data- and compute-starved here and uses exactly the mean+std pooling that §6 says is
 wrong, so **67.1 % is a floor for the learned route, not its ceiling.** The operative number is
 the other one: **any design that does not clearly beat ~69 % has bought nothing over a decision
@@ -342,6 +350,6 @@ docstrings describe what its code does.
 2. **One precision, everywhere**, with `nn.LayerNorm` and a test that fp32 and fp16 agree. (§3)
 3. **A pooling operator that can express cardinality**, not `mean`+`std`. (§6)
 4. **Baselines and the leak audit run first, on CPU, and fail loudly** — before a GPU hour is
-   spent, with a test asserting the report was written. The bar is 69.3 %, not 20 %. (§4, §5)
+   spent, with a test asserting the report was written. The bar is 57.8 %, not 20 %. (§4, §5)
 5. **Mixing settings chosen against measured costs**, and a label-noise policy that never puts
    speech in the noise. (§5, §7)

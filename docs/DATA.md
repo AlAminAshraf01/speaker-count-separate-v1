@@ -12,7 +12,7 @@ You asked this explicitly, so here is the direct answer first and the reasoning 
 
 The instinct behind the question is right, though, and worth naming: the counter failed, so
 maybe the data was wrong. It wasn't. `docs/DIAGNOSIS.md` shows a decision tree over sixteen
-hand-crafted numbers reaching 69.3 % on exactly this data while the 5.3 M-parameter network
+hand-crafted numbers reaching 57.8 % on exactly this data while the 5.3 M-parameter network
 reached 20.0 %. **The information was in the data the whole time.** Changing corpora would have
 changed nothing and cost a week.
 

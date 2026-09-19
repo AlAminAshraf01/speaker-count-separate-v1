@@ -31,9 +31,21 @@ saved only **8.4 %** of the forward FLOPs, because the TCN is the expense. A ded
 its own gradient in exchange.
 
 One more number, for scale. Sixteen hand-crafted acoustic scalars fed to a gradient-boosted tree
-count speakers at **69.3 %** on the same data. A decision tree beat the 5.3 M network by
-**49 points**. That system is in here as `countsep.features` + `countsep.baselines`, it runs on
-CPU in minutes, and nothing neural is allowed to claim victory without beating it.
+count speakers at **57.8 %** — measured on real LibriSpeech, speaker-disjoint 5-fold over 7,500
+mixtures from 201 talkers, MAE 0.480. A decision tree beat the 5.3 M network by **38 points**.
+That system is in here as `countsep.features` + `countsep.baselines`, it runs on CPU in minutes,
+and nothing neural is allowed to claim victory without beating it.
+
+### Where each number comes from
+
+| | |
+|---|---|
+| **57.8 %** Tier A, and every v0 figure above | **measured** — real LibriSpeech |
+| the pooling comparison in `docs/DESIGN.md` §2 | a **synthetic speech proxy**, pending notebook 02 |
+
+An earlier draft of these documents quoted **69.3 %** for Tier A. That was the proxy, not
+LibriSpeech, and the real run came in 11.5 points lower. Proxy figures are now labelled
+wherever they appear; do not put an unlabelled one in your report.
 
 ---
 

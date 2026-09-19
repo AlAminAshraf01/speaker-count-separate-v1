@@ -24,8 +24,8 @@ answering "1 speaker" to almost everything. Splitting them costs about 5 % more 
 gives each job its own full training signal. `docs/DIAGNOSIS.md` has the measurements.
 
 There is also a **Tier A** counter that uses no GPU at all: sixteen measurements of the sound
-(how "spiky" it is, how much silence it contains) fed to a decision tree. It scores 69.3 %,
-which is 49 points better than the old 5.3-million-parameter network managed. It is the bar
+(how "spiky" it is, how much silence it contains) fed to a decision tree. It scores 57.8 %,
+which is 38 points better than the old 5.3-million-parameter network managed. It is the bar
 everything else has to clear, and on its own it is already a complete project.
 
 ---
@@ -169,9 +169,9 @@ The script proves this rather than claiming it. It runs the same test twice — 
 *before* the fix and once *after*:
 
 ```
-artefact        BEFORE mitigation ............ 42.3 %   -> LEAK
+artefact        BEFORE mitigation ............ 44.2 %   -> LEAK
 artefact_strict AFTER  mitigation ............ 20.0 %   -> OK
-acoustic        AFTER  mitigation ............ 58.3 %   -> SIGNAL
+acoustic        AFTER  mitigation ............ 46.3 %   -> SIGNAL
 ```
 
 The top line has to be high, or the test is broken and its clean verdict means nothing. The
@@ -181,11 +181,16 @@ middle line has to be 20 % (pure chance). The bottom line is real speech evidenc
 5-fold search that keeps **each speaker entirely on one side of the split**. An ordinary split
 would let the model recognise voices instead of counting them, which inflates the score.
 
+Those are the real figures from this project's own LibriSpeech run, not illustrations.
+
+The `acoustic` probe's 46.3 % and Tier A's 57.8 % are both honest and they differ because the
+probe is a quick 1,500-mixture depth-3 tree and Tier A is a tuned 7,500-mixture grid search.
+**Tier A's number is the bar**, and notebook 02 reads it out of `tier_a_report.json` by itself.
+
 **Write down the last number it prints.** It looks like:
 
 ```
-Tier A, speaker-disjoint K-fold .......  69.8%  <-- BEAT THIS
-Pass this to 04_train.py as --bar 0.698
+Tier A, speaker-disjoint K-fold .......  57.8%  <-- BEAT THIS
 ```
 
 **Save Version → Save & Run All (Commit).**
@@ -228,6 +233,10 @@ into one answer**. Changing only that one layer, on identical data:
 | **the covariance's eigenvalue spectrum** ← default | **74.4 %** |
 
 An 8-point swing from one layer, and the winner is the smallest and fastest.
+
+> **Those four are a synthetic speech proxy, not LibriSpeech** — they were run to rank the
+> operators, and the ranking is the point. Do not compare them to your Tier A number, which
+> is real audio. This notebook is what replaces them.
 
 The intuition: if N people talk at once, the sound fills roughly **N independent directions**.
 Eigenvalues say *how many* directions carry energy — that is your count. Eigenvectors say *which*
