@@ -264,6 +264,29 @@ This is the expensive one. Everything else together is under 4 GPU-hours.
 3. **+ Add Input → Notebook Output →** notebook 00's run
 4. **Run All**
 
+### Why batch 12 fits, and what to do if it does not
+
+This notebook ran out of GPU memory the first time it was tried, and not marginally: one
+forward-and-backward pass held **18.05 GB** of intermediate results against a card with
+**14.56 GB**. Batch 12 was never going to fit. 55 % of that was one layer — `GlobalLayerNorm`,
+which kept three full-size tensors every time it ran, across 49 copies of itself. Folding its
+arithmetic differently cut the model to **11.33 GB**, so batch 12 now fits with about **1.8 GB**
+to spare, and the forward pass got slightly *faster* in the bargain.
+
+If you still see `torch.OutOfMemoryError`, your clone is older than that fix — re-run so the
+first cell pulls it. Only if it persists, set **`BATCH_SIZE = 8`** *and* **`STEPS_PER_EPOCH =
+1500`**.
+
+> **Change both, not one.** This script sizes an epoch as `steps_per_epoch × batch_size`
+> mixtures, so dropping the batch on its own quietly cuts your training data by a third while
+> the log still says "30 epochs". Together they hold the epoch, the data and the GPU budget
+> exactly where they were.
+
+**Do not reach for `--amp`.** It looks like a free halving of memory and measures 1.39×, because
+under mixed precision the fp32 conversion inside that same norm becomes a real copy — so half
+the peak stays fp32 whatever you do. It would not reach batch 12 anyway, and it reopens the
+precision failure this version was rebuilt to close.
+
 ### What to watch
 
 The `SI-SDRi` column with the per-N breakdown beside it. Two things:
