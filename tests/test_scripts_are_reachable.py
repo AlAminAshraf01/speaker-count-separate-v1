@@ -203,6 +203,80 @@ def test_every_countsep_import_resolves() -> None:
     assert not stale, "these import countsep modules that do not exist: " + "; ".join(stale)
 
 
+def test_stateful_modules_are_moved_to_the_device() -> None:
+    """A module with buffers that is built but never ``.to(device)``'d fails only on a GPU.
+
+    ``05_train_separator.py`` moved the model and not the loss. ``RectangularPITLoss`` holds
+    ten non-persistent buffers -- the permutation tables the rectangular PIT assignment
+    gathers with -- so on CUDA the gather got a cuda ``sub_loss`` and a cpu ``index`` and
+    died on the first batch, after preflight had passed 9/9 and the dataset had loaded.
+
+    No CPU test can reproduce that: with one device everything trivially agrees, and the
+    ``meta`` device does not raise on a mismatched gather (checked). The counter's trainer
+    hid the same class of bug by luck -- ``nn.CrossEntropyLoss`` has no buffers.
+
+    So this is structural. It finds every statement that constructs a ``countsep`` module and
+    requires the same statement to place it, by ``.to(...)`` or a ``device=`` argument. The
+    set of module factories is discovered by import rather than hand-listed, because a
+    hand-list rots at the first rename -- which this project has already been bitten by.
+    """
+    import ast
+    import importlib
+    import inspect
+    import pkgutil
+
+    import torch
+
+    import countsep
+
+    modules, factories = set(), set()
+    for info in pkgutil.iter_modules(countsep.__path__):
+        namespace = vars(importlib.import_module(f"countsep.{info.name}"))
+        for attr, obj in namespace.items():
+            if attr.startswith("_"):
+                continue
+            if inspect.isclass(obj) and issubclass(obj, torch.nn.Module):
+                modules.add(attr)
+    for info in pkgutil.iter_modules(countsep.__path__):
+        namespace = vars(importlib.import_module(f"countsep.{info.name}"))
+        for attr, obj in namespace.items():
+            if inspect.isfunction(obj) and attr.startswith("build_"):
+                # Only a factory ANNOTATED as returning an nn.Module counts. build_loader
+                # returns a DataLoader and must not be flagged.
+                returns = inspect.signature(obj).return_annotation
+                if isinstance(returns, str) and returns in modules:
+                    factories.add(attr)
+    builders = modules | factories
+    assert "RectangularPITLoss" in builders and "build_separator" in builders,         "the factory scan found nothing; the check would pass vacuously"
+    assert "build_loader" not in builders, "build_loader returns a DataLoader, not a module"
+
+    offenders = []
+    scripts = os.path.join(REPO_ROOT, "scripts")
+    for name in sorted(os.listdir(scripts)):
+        if not name.endswith(".py"):
+            continue
+        with open(os.path.join(scripts, name), "r", encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            built = None
+            placed = False
+            for sub in ast.walk(node.value):
+                if isinstance(sub, ast.Call):
+                    if isinstance(sub.func, ast.Name) and sub.func.id in builders:
+                        built = sub.func.id
+                    if any(kw.arg == "device" for kw in sub.keywords):
+                        placed = True
+                if isinstance(sub, ast.Attribute) and sub.attr == "to":
+                    placed = True
+            if built and not placed:
+                offenders.append(f"scripts/{name}:{node.lineno} builds {built} without .to(device)")
+
+    assert not offenders, ("built on the CPU and used on the GPU: "
+                           + "; ".join(offenders))
+
+
 if __name__ == "__main__":
     sys.exit(run_checks({
         "every script has a main": test_every_script_has_a_main,
@@ -211,5 +285,6 @@ if __name__ == "__main__":
         "no unreachable code after a return": test_no_unreachable_code_after_a_return,
         "audit script verifies its own output": test_audit_script_verifies_its_own_output,
         "every countsep import resolves": test_every_countsep_import_resolves,
+        "stateful modules are moved to the device": test_stateful_modules_are_moved_to_the_device,
         "scripts exit with main()": test_scripts_exit_with_main,
     }))

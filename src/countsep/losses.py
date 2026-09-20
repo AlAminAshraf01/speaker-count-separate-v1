@@ -171,8 +171,13 @@ class RectangularPITLoss(nn.Module):
         computed as if every item had exactly ``n`` sources; the caller masks it.
         """
         batch = pw_loss.shape[0]
-        arr: torch.Tensor = self.get_buffer(f"arr_{n}")
-        comp: torch.Tensor = self.get_buffer(f"comp_{n}")
+        # Follow the input's device rather than trusting the caller to have moved this
+        # module. These are constant arrangement tables -- a few kilobytes -- so `.to` is a
+        # no-op when the caller did the right thing and a cheap rescue when it did not.
+        # 05_train_separator.py moved the model and not the loss, and the gather below died
+        # on the first CUDA batch after preflight had passed every row.
+        arr: torch.Tensor = self.get_buffer(f"arr_{n}").to(pw_loss.device)
+        comp: torch.Tensor = self.get_buffer(f"comp_{n}").to(pw_loss.device)
         n_arr = arr.shape[0]
 
         index = arr.view(1, n_arr, n, 1).expand(batch, n_arr, n, 1)

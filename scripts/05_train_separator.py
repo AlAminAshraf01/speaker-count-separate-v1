@@ -170,9 +170,14 @@ def main() -> int:
     print(f"  {model.describe()}")
     print(f"  device: {device}   |   training on N in {args.n_list}")
 
+    # .to(device) is not decoration: this loss registers ten permutation-table buffers, and
+    # the rectangular PIT assignment gathers with them. Left on the CPU they meet a CUDA
+    # tensor on the first batch. nn.CrossEntropyLoss has no buffers, which is the only
+    # reason 04_train_counter.py survives without this line.
     loss_fn = RectangularPITLoss(max_n_src=MAX_N_SRC, predict_noise=True,
                                  w_sep=1.0, w_sil=args.w_sil, w_count=0.0,
-                                 w_noise=args.w_noise, clamp_si_sdr=args.clamp_si_sdr)
+                                 w_noise=args.w_noise,
+                                 clamp_si_sdr=args.clamp_si_sdr).to(device)
     print(f"  loss: w_sep 1.0, w_sil {args.w_sil}, w_noise {args.w_noise}, "
           f"w_count 0.0 (counting is a separate model), HARD clamp at {args.clamp_si_sdr} dB")
 
