@@ -176,9 +176,17 @@ two jobs and averaging them hides which half is broken:
    gamed by a system that refuses to commit.
 3. **SI-SDRi per N, count-correct subset only** — the row comparable to the fixed-N literature,
    which is always told N.
-4. **SI-SDRi per N with the true count forced** — separation given a perfect counter. **The gap
-   between 3 and 4 is what miscounting costs**, and it says which half to work on next. Being
-   able to ask that question is the practical payoff of the two-specialist design.
+4. **SI-SDRi per N with the true count forced, over all clips** — separation given a perfect
+   counter.
+
+**Correction, measured 2026-09-21.** An earlier version of this document said the gap between
+3 and 4 is what miscounting costs. It is not. `06_evaluate.py` calls `usable_si_sdri` with the
+**true** count for both, and section 3 is a subset of section 4's own scores, so neither reads
+the counter. On the real run they differ by 0.07 dB, which is composition — section 3 drops the
+clips the counter missed and so carries a different mix of N — and per N the sign even reverses.
+**P-SI-SNR is the only number in the report that responds to the counter**, because it keeps the
+`n_hat` loudest slots the way inference does. It is also an *absolute* SI-SNR, not an
+improvement, so it must not be compared against the SI-SDRi rows.
 
 **Intervals.** `pack.assign_roles` reserves 20 % of each split for babble, so LibriMix's
 251/40/40 become **201/32/32** usable target speakers. The 1,500 test mixtures are 1,500 draws

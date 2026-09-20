@@ -290,6 +290,42 @@ def group_by_n(records: Sequence[dict], keys: Sequence[str]) -> dict[int, dict[s
     return out
 
 
+def correlate_within(records: Sequence[dict], x_key: str, y_key: str,
+                     group_key: str = "n_true") -> dict:
+    """The same correlation computed INSIDE each speaker count, then pooled.
+
+    A pooled correlation over all N answers a question nobody asked. Mask overlap rises with
+    N and SI-SDRi falls with N, so N alone makes the two nearly collinear: across the five
+    group means of the real run, r = -0.993. Pooling therefore reports that N exists, which
+    was never in doubt, and says nothing about whether one mixture's geometry predicts its
+    own separation quality.
+
+    This returns the per-group correlations and a Fisher-z pooled estimate weighted by
+    ``n_g - 3``, which is the within-group effect -- the quantity the mechanistic claim is
+    actually about. Report it beside the pooled number, never instead of it: for a genuine
+    N -> overlap -> degradation mediation the pooled value is the total effect and is also
+    meaningful.
+    """
+    groups: dict = {}
+    for record in records:
+        groups.setdefault(record.get(group_key), []).append(record)
+
+    per_group, weights, zs = {}, [], []
+    for key in sorted(g for g in groups if g is not None):
+        stat = correlate(groups[key], x_key, y_key)
+        per_group[int(key)] = stat
+        r, n = stat["pearson_r"], stat["n"]
+        if np.isfinite(r) and n > 3 and abs(r) < 1.0:
+            zs.append(np.arctanh(r))
+            weights.append(n - 3)
+
+    if not weights:
+        return {"per_group": per_group, "pooled_r": float("nan"), "n": 0}
+    z = float(np.average(zs, weights=weights))
+    return {"per_group": per_group, "pooled_r": float(np.tanh(z)),
+            "n": int(sum(weights) + 3 * len(weights))}
+
+
 def correlate(records: Sequence[dict], x_key: str, y_key: str) -> dict[str, float]:
     """Pearson and Spearman correlation between two recorded statistics."""
     from scipy.stats import pearsonr, spearmanr

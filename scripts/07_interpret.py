@@ -41,6 +41,18 @@ from _common import (add_common_args, banner, build_store_and_bank, code_version
                      require_store, resolve)
 
 
+def trend_across_n(by_n: dict, key: str, n_list) -> float:
+    """Net movement of one statistic from the lowest defined N to the highest.
+
+    Lives at module level because a ``def`` inside ``main()`` is the shape of the
+    predecessor's worst bug, and ``tests/test_scripts_are_reachable.py`` fails the build
+    on it. It caught this function when it was written inline.
+    """
+    vals = [by_n.get(n, {}).get(key, float("nan")) for n in n_list]
+    vals = [v for v in vals if v == v]              # nan cells: N=1 has no slot pair
+    return (vals[-1] - vals[0]) if len(vals) > 1 else float("nan")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -59,7 +71,8 @@ def main() -> int:
     from countsep.checkpoint import load_checkpoint
     from countsep.constants import N_LIST, SR
     from countsep.datasets import DEFAULT_MIXING, FrozenMixDataset, build_loader
-    from countsep.interpret import (collect_mask_records, correlate, extract_filterbank,
+    from countsep.interpret import (collect_mask_records, correlate, correlate_within,
+                                    extract_filterbank,
                                     filter_centre_frequencies, group_by_n, hoyer_sparsity,
                                     mel_reference, peak_frequencies)
     from countsep.separator import ModelConfig, build_separator
@@ -100,9 +113,24 @@ def main() -> int:
           f"(a mel scale would put {float((mel < 1000).mean()):.0%} there)")
     print(f"  mean Hoyer sparsity of a filter's spectrum: "
           f"{float(np.mean([hoyer_sparsity(np.abs(np.fft.rfft(f))) for f in filters])):.3f}")
-    print("\n  A basis concentrated at low frequencies is the expected result: that is where")
-    print("  voiced speech has its harmonic structure, and pitch is what tells two talkers")
-    print("  apart. If it came out flat, the encoder had not learned anything speech-specific.")
+    # Two references, so the reader compares against numbers rather than against a claim.
+    # A uniform basis on this grid puts 1000/(SR/2) of its peaks below 1 kHz.
+    mel_below_1k = float((mel < 1000).mean())
+    flat_below_1k = 1000.0 / (SR / 2)
+    print("\n  Against two references rather than against an expectation:")
+    print(f"    mel would put ....... {mel_below_1k:.0%} below 1 kHz")
+    print(f"    uniform would put ... {flat_below_1k:.0%}")
+    print(f"    measured ............ {below_1k:.0%}")
+    if abs(below_1k - flat_below_1k) < abs(below_1k - mel_below_1k):
+        print("\n  So the basis tiles the band roughly UNIFORMLY. It is not mel-like and it is")
+        print("  not concentrated at low frequencies. Report that as the finding.")
+        print("  It does not license the opposite conclusion either: a histogram of peak")
+        print("  frequencies cannot settle whether the encoder learned anything")
+        print("  speech-specific, and nothing in this script tests that. Leave it open.")
+    else:
+        print("\n  The basis is concentrated at low frequencies, closer to mel than to uniform.")
+        print("  That is where voiced speech carries its harmonic structure, and pitch is")
+        print("  what separates two talkers.")
     report["filterbank"] = {
         "n_filters": int(len(filters)), "length": int(filters.shape[1]),
         "peak_hz_quartiles": [float(v) for v in quartiles],
@@ -128,20 +156,54 @@ def main() -> int:
         vals = by_n.get(n, {})
         rows.append([f"N={n}"] + [f"{vals.get(k, float('nan')):.3f}" for k in keys])
     print(format_table(rows, ["true N", "mask overlap", "sparsity", "entropy", "SI-SDRi"]))
-    print("\n  The claim to check: overlap RISES and sparsity FALLS as N grows, because the")
-    print("  same basis is being split among more sources. If both hold, the degradation")
-    print("  curve is explained by the network's own internals rather than asserted.")
+    d_overlap = trend_across_n(by_n, "overlap_cosine", N_LIST)
+    d_sparsity = trend_across_n(by_n, "sparsity_hoyer", N_LIST)
+    print("\n  The prediction was that overlap RISES and sparsity FALLS as N grows, because")
+    print("  the same basis is split among more sources. Whether it held:")
+    verdict_o = "RISES, as predicted" if d_overlap > 0 else "does NOT rise -- claim FAILS"
+    verdict_s = "falls, as predicted" if d_sparsity < 0 else "does NOT fall -- claim FAILS"
+    print(f"    overlap   {d_overlap:+.3f} across N   -> {verdict_o}")
+    print(f"    sparsity  {d_sparsity:+.3f} across N   -> {verdict_s}")
+    if not (d_overlap > 0 and d_sparsity < 0):
+        print("\n  Only part of the mechanism is supported. Report the half that held and the")
+        print("  half that did not. A degradation curve half-explained is still a result;")
+        print("  claiming both halves when the table above says otherwise is not.")
     report["mask_geometry"] = {str(n): v for n, v in sorted(by_n.items())}
 
     # ---------------------------------------------------------------- 3. does geometry predict quality
     banner("3. does mask geometry predict separation quality?")
+    print("  A POOLED correlation mixes two things: that N moves both variables, and that")
+    print("  geometry may predict quality WITHIN a fixed N. Only the second is the")
+    print("  mechanistic claim. Across the group means alone N makes overlap and SI-SDRi")
+    print("  nearly collinear, so quote the within-N row.\n")
     for x_key in ("overlap_cosine", "sparsity_hoyer"):
         stat = correlate(records, x_key, "si_sdri")
-        print(f"  {x_key:<15} vs SI-SDRi:  pearson r = {stat['pearson_r']:+.3f} "
-              f"(p = {stat['pearson_p']:.3g})   spearman = {stat['spearman_r']:+.3f}  "
-              f"(n = {stat['n']})")
-    print("\n  A strong negative correlation for overlap is the mechanistic statement: mixtures")
-    print("  whose masks fight each other are the mixtures the model separates badly.")
+        within = correlate_within(records, x_key, "si_sdri")
+        per = "  ".join(
+            f"N{n}:{v['pearson_r']:+.2f}"
+            for n, v in sorted(within["per_group"].items())
+            if v["pearson_r"] == v["pearson_r"])
+        print(f"  {x_key}")
+        print(f"    pooled    r = {stat['pearson_r']:+.3f}  (p = {stat['pearson_p']:.3g})   "
+              f"spearman = {stat['spearman_r']:+.3f}   n = {stat['n']}")
+        print(f"    within-N  r = {within['pooled_r']:+.3f}   {per}")
+    overlap_within = correlate_within(records, "overlap_cosine", "si_sdri")["pooled_r"]
+    print("")
+    if overlap_within < -0.2:
+        print(f"  Within a fixed N, overlap still predicts quality (r = {overlap_within:+.3f}).")
+        print("  That is the mechanistic statement: among mixtures with the SAME number of")
+        print("  talkers, the ones whose masks fight each other are the ones separated badly.")
+    elif overlap_within > 0.2:
+        print(f"  Within a fixed N the relationship REVERSES SIGN (r = {overlap_within:+.3f}).")
+        print("  Higher overlap going with BETTER separation is the opposite of the mechanism,")
+        print("  so the pooled negative number is N acting on both variables and nothing more.")
+        print("  Report the reversal; it is more interesting than the pooled figure and it")
+        print("  rules the mechanism out rather than leaving it open.")
+    else:
+        print(f"  Within a fixed N the relationship is {overlap_within:+.3f} -- weak or absent.")
+        print("  So the pooled number is largely N acting on both variables, not geometry")
+        print("  predicting quality mixture by mixture. The honest claim is the weaker one:")
+        print("  overlap rises with N and quality falls with N. Do not say more than that.")
     report["correlations"] = {k: correlate(records, k, "si_sdri")
                               for k in ("overlap_cosine", "sparsity_hoyer", "entropy")}
 
@@ -167,16 +229,30 @@ def main() -> int:
 
         stat = correlate(records, "count_confidence", "si_sdri")
         overlap_stat = correlate(records, "count_confidence", "overlap_cosine")
+        within_stat = correlate_within(records, "count_confidence", "si_sdri")
         print(f"  counter confidence vs separator SI-SDRi ....... r = "
               f"{stat['pearson_r']:+.3f}  (p = {stat['pearson_p']:.3g}, n = {stat['n']})")
         print(f"  counter confidence vs separator mask overlap .. r = "
               f"{overlap_stat['pearson_r']:+.3f}  (p = {overlap_stat['pearson_p']:.3g}, "
               f"n = {overlap_stat['n']})")
-        print("\n  These two models share NO parameters and were trained on different")
-        print("  objectives. A correlation here is therefore a statement about the audio --")
-        print("  some mixtures are simply hard -- and not an artefact of a shared trunk.")
-        print("  v0 could not make this claim: its count head read the very features whose")
-        print("  geometry it was being correlated against.")
+        within_per_n = "  ".join(
+            f"N{n}:{v['pearson_r']:+.2f}"
+            for n, v in sorted(within_stat["per_group"].items())
+            if v["pearson_r"] == v["pearson_r"])
+        print(f"  within N, confidence vs SI-SDRi ............... r = "
+              f"{within_stat['pooled_r']:+.3f}   {within_per_n}")
+        print("")
+        print("  The two models share NO parameters and optimise different objectives, so a")
+        print("  correlation here cannot be a shared-trunk artefact the way v0's would have")
+        print("  been -- its count head read the very features whose geometry it was")
+        print("  correlated against. But architectural independence does not rule out the")
+        print("  OTHER confound: both quantities move with N on their own. Quote the")
+        print("  within-N row, which is the claim; the pooled row mostly restates that N")
+        print("  exists.")
+        if abs(within_stat["pooled_r"]) < 0.15:
+            print("")
+            print("  As measured, the within-N effect is weak. The honest report is that the")
+            print("  independence is real and the agreement is not established.")
         report["cross_model"] = {"confidence_vs_si_sdri": stat,
                                  "confidence_vs_overlap": overlap_stat}
 

@@ -210,6 +210,66 @@ def test_parameter_count_stays_small() -> None:
         assert 1e5 < n < 1.5e6, f"{name}: {n / 1e6:.3f} M parameters is outside the intended band"
 
 
+def test_dynamic_mixing_cannot_be_frozen_by_persistent_workers() -> None:
+    """Persistent workers silently disable dynamic mixing, and the loss never tells you.
+
+    ``DynamicMixDataset.set_epoch`` sets ``self.epoch_salt``, which seeds the per-item RNG.
+    A DataLoader with ``num_workers > 0, persistent_workers=True`` hands each worker a
+    SNAPSHOT of the dataset when it spawns and keeps those workers alive across epochs, so
+    the mutation never crosses the process boundary.
+
+    This shipped. Measured on this repo, three consecutive epochs at num_workers=2,
+    persistent=True all rendered mix_id "dyn0_*" -- byte-identical mixtures every epoch. The
+    separator trained on 12,000 distinct mixtures rather than the 360,000 its notebook
+    printed, the counter on 128,000 rather than 2,560,000, and the only visible symptom was
+    a counter that peaked at epoch 8 and then memorised its way to 99.5 % train accuracy
+    against 83.3 % validation.
+
+    Nothing about a loss going down could have caught it, which is why ``build_loader``
+    refuses the combination instead of warning about it.
+    """
+    from countsep.datasets import build_loader
+
+    class Mixes(torch.utils.data.Dataset):
+        """Stands in for DynamicMixDataset: the epoch is mutable state on the instance."""
+
+        epoch = 0
+
+        def set_epoch(self, epoch: int) -> None:
+            self.epoch = int(epoch)
+
+        def __len__(self) -> int:
+            return 4
+
+        def __getitem__(self, idx: int) -> dict:
+            return {"mix": torch.zeros(4)}
+
+    try:
+        build_loader(Mixes(), batch_size=2, shuffle=False, num_workers=2, persistent=True)
+        raise AssertionError(
+            "build_loader accepted persistent workers over a dataset with set_epoch(). "
+            "Every epoch would draw identical mixtures and nothing would say so.")
+    except ValueError as exc:
+        assert "set_epoch" in str(exc) and "persistent" in str(exc), (
+            f"the refusal must name the cause and the remedy; got: {exc}")
+
+    # The safe combinations must still be allowed, or the guard is just breakage.
+    build_loader(Mixes(), batch_size=2, shuffle=False, num_workers=2, persistent=False)
+    build_loader(Mixes(), batch_size=2, shuffle=False, num_workers=0)
+
+    class Frozen(torch.utils.data.Dataset):
+        """A frozen set has no epoch to advance, so persistent workers are correct for it."""
+
+        def __len__(self) -> int:
+            return 4
+
+        def __getitem__(self, idx: int) -> dict:
+            return {"mix": torch.zeros(4)}
+
+    assert not hasattr(Frozen(), "set_epoch"), "the control must not carry set_epoch"
+    build_loader(Frozen(), batch_size=2, shuffle=False, num_workers=2, persistent=True)
+
+
 if __name__ == "__main__":
     sys.exit(run_checks({
         "every pooling builds and runs": test_every_pooling_builds_and_runs,
@@ -219,4 +279,5 @@ if __name__ == "__main__":
         "logits vary with the input": test_logits_actually_vary_with_the_input,
         "STFT stays fp32 under autocast": test_stft_is_computed_in_fp32_under_autocast,
         "parameter count stays small": test_parameter_count_stays_small,
+        "dynamic mixing survives the dataloader": test_dynamic_mixing_cannot_be_frozen_by_persistent_workers,
     }))

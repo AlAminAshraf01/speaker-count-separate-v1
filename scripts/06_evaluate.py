@@ -200,13 +200,20 @@ def main() -> int:
 
     # ---------------------------------------------------------------- 2-4. separation
     if separator is not None:
-        banner("2. P-SI-SNR over the whole test set")
-        print("  Defined even when the count is wrong, so it cannot be gamed by abstaining.")
+        banner("2. P-SI-SNR over the whole test set   (the ONLY counter-sensitive number)")
+        print("  Defined even when the count is wrong, so it cannot be gamed by abstaining,")
+        print("  and it is the one score here that reads the PREDICTED count: it keeps the")
+        print("  n_hat loudest slots, exactly as inference does. Sections 3 and 4 both score")
+        print("  against the true count, so neither of them responds to the counter at all.")
+        print("  NOTE: this is an ABSOLUTE SI-SNR, not an improvement. Do not compare it")
+        print("  with the SI-SDRi values below -- they measure different things in the same unit.")
         print(f"  P-SI-SNR ........ {float(np.mean(psi)):+.2f} dB   (n={len(psi)})")
         report["p_si_snr"] = float(np.mean(psi))
 
-        banner("3. SI-SDRi per N, COUNT-CORRECT subset only")
-        print("  This is the row comparable to the fixed-N literature, which is always told N.")
+        banner("3. SI-SDRi per N, true-count scoring, COUNT-CORRECT clips only")
+        print("  Scored against the true sources, restricted to the clips the counter got")
+        print("  right. This is the row comparable to the fixed-N literature, which is always")
+        print("  told N -- but note the restriction makes it a slightly easier subset.")
         rows = []
         for n in N_LIST:
             vals = per_n_correct.get(n, [])
@@ -219,9 +226,15 @@ def main() -> int:
         report["si_sdri_count_correct"] = {str(n): float(np.mean(v))
                                            for n, v in sorted(per_n_correct.items()) if v}
 
-        banner("4. SI-SDRi per N with the TRUE count forced (separation given a perfect counter)")
-        print("  Compare with section 3: the gap between them IS the cost of miscounting,")
-        print("  and it is the number that says which half to work on next.")
+        banner("4. SI-SDRi per N, true-count scoring, ALL clips")
+        print("  Separation quality given a perfect counter, over every clip.")
+        print("")
+        print("  Section 3 minus section 4 is NOT the cost of miscounting, though an earlier")
+        print("  version of this script and of docs/DESIGN.md both said it was. Both sections")
+        print("  score with the TRUE count -- section 3 is literally a subset of the same")
+        print("  numbers -- so neither reads the counter. Their difference is composition:")
+        print("  section 3 drops the clips the counter missed, which shifts its mix of N.")
+        print("  For what miscounting actually costs, read P-SI-SNR in section 2.")
         rows = []
         for n in N_LIST:
             vals = per_n_oracle.get(n, [])

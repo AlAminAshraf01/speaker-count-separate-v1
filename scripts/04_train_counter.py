@@ -159,8 +159,11 @@ def main() -> int:
         print(f"  dev: no frozen recipes given, using a fixed-salt dynamic set "
               f"({len(dev_set)} mixtures). Generate frozen recipes for a reportable number.")
 
+    # persistent=False is load-bearing -- see build_loader. With persistent workers,
+    # set_epoch() never reaches them and all 20 epochs reuse one fixed set of mixtures.
     train_loader = build_loader(train_set, batch_size=args.batch_size, shuffle=False,
-                                num_workers=args.num_workers, drop_last=True)
+                                num_workers=args.num_workers, drop_last=True,
+                                persistent=False)
     dev_loader = build_loader(dev_set, batch_size=args.batch_size, shuffle=False,
                               num_workers=max(1, args.num_workers - 1), persistent=False)
 

@@ -204,6 +204,20 @@ def build_loader(dataset: Dataset, *, batch_size: int, shuffle: bool, num_worker
     """
     from .utils import set_worker_seed
 
+    # persistent_workers + set_epoch is a silent data bug, so it is refused rather than
+    # warned about. Workers hold a SNAPSHOT of the dataset taken when they spawned;
+    # set_epoch mutates the parent's copy and never reaches them. Measured on this repo:
+    # with num_workers=2, persistent=True, three consecutive epochs all rendered mix_id
+    # "dyn0_*" -- the same mixtures every epoch. It cost the separator 29 of its 30 epochs
+    # of fresh data (12,000 distinct mixtures instead of the 360,000 the notebook printed)
+    # and the counter 19 of 20, and it is invisible: the loss still falls, because the
+    # model is memorising a fixed set.
+    if num_workers > 0 and persistent and hasattr(dataset, "set_epoch"):
+        raise ValueError(
+            f"{type(dataset).__name__} has set_epoch(), so persistent workers would freeze "
+            f"it at whatever epoch they spawned in and every epoch would draw identical "
+            f"mixtures. Pass persistent=False for a dynamically-mixed training loader.")
+
     if pin_memory is None:
         pin_memory = torch.cuda.is_available()
     kwargs: dict = {

@@ -159,8 +159,12 @@ def main() -> int:
         dev_set.set_epoch(999)
         print(f"  dev: fixed-salt dynamic set ({len(dev_set)} mixtures)")
 
+    # persistent=False is load-bearing: set_epoch() cannot reach persistent workers, and
+    # without it every epoch re-renders the SAME mixtures. build_loader now refuses the
+    # combination outright rather than letting it pass silently again.
     train_loader = build_loader(train_set, batch_size=args.batch_size, shuffle=False,
                                 num_workers=args.num_workers, drop_last=True,
+                                persistent=False,
                                 prefetch_factor=2)
     dev_loader = build_loader(dev_set, batch_size=args.batch_size, shuffle=False,
                               num_workers=max(1, args.num_workers - 1), persistent=False,
