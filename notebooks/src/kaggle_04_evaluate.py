@@ -26,18 +26,46 @@
 # %%
 import glob
 import sys
+import time
 sys.path.insert(0, os.path.join(REPO, "scripts"))
 from _common import autodetect_store, find_recipes
 
 STORE = autodetect_store()
 RECIPES_TEST = find_recipes("recipes_test.csv", STORE)
 
-def _find(pattern):
-    hits = sorted(glob.glob(pattern, recursive=True))
-    return hits[0] if hits else None
+# Pin these to a specific path if you want to force a particular run; otherwise the
+# newest attached checkpoint wins and every candidate is printed.
+COUNTER_OVERRIDE = None
+SEPARATOR_OVERRIDE = None
 
-COUNTER   = _find("/kaggle/input/**/counter/ckpt/best.pt") or _find("/kaggle/input/**/ckpt/best.pt")
-SEPARATOR = _find("/kaggle/input/**/sep/ckpt/best.pt")
+
+def _find(pattern, override=None):
+    """The NEWEST matching checkpoint, with every candidate shown.
+
+    This used to be `sorted(glob(...))[0]` -- alphabetical, silent. That is fine while one
+    run is attached and quietly wrong the moment two are, which is exactly what happens
+    when you re-run a training notebook and attach both versions to compare. Alphabetical
+    order has nothing to do with which model you meant, and the final evaluation is the
+    worst possible place to load the wrong weights without being told.
+    """
+    if override:
+        print(f"    using the pinned path: {override}")
+        return override
+    hits = glob.glob(pattern, recursive=True)
+    if not hits:
+        return None
+    hits.sort(key=os.path.getmtime, reverse=True)
+    if len(hits) > 1:
+        print(f"    {len(hits)} candidates matched {pattern} -- taking the newest:")
+        for i, h in enumerate(hits):
+            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(h)))
+            print(f"      {'->' if i == 0 else '  '} {when}  {h}")
+        print("      (set COUNTER_OVERRIDE / SEPARATOR_OVERRIDE above to pin one instead)")
+    return hits[0]
+
+COUNTER   = (_find("/kaggle/input/**/counter/ckpt/best.pt", COUNTER_OVERRIDE)
+             or _find("/kaggle/input/**/ckpt/best.pt"))
+SEPARATOR = _find("/kaggle/input/**/sep/ckpt/best.pt", SEPARATOR_OVERRIDE)
 TIER_A    = _find("/kaggle/input/**/tier_a_model.joblib")
 
 print("store       :", STORE)
