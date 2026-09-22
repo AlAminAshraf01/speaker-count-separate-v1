@@ -191,8 +191,26 @@ def main() -> int:
 
         print(f"  accuracy ........ {rep['accuracy']:.1%}")
         print(f"    Wilson 95 % ... [{lo:.1%}, {hi:.1%}]   (treats mixtures as independent)")
-        print(f"    speaker 95 % .. [{blo:.1%}, {bhi:.1%}]   <-- the honest one "
+        # Which of the two is "honest" depends on how they came out, so decide here
+        # rather than hard-coding it. A cluster bootstrap resamples whole speakers and
+        # keeps each drawn speaker's clips intact, so it never resamples WITHIN a
+        # cluster: it measures between-speaker variance and misses the binomial
+        # variation Wilson covers. When speakers are homogeneous it therefore comes out
+        # NARROWER than Wilson and under-covers -- measured here, that happens in 62 %
+        # of simulated runs with no speaker effect at all. Calling the narrower one
+        # "honest" would understate the uncertainty in the headline number.
+        print(f"    speaker 95 % .. [{blo:.1%}, {bhi:.1%}]   "
               f"({len(distinct)} clusters, not {len(dataset)} mixtures)")
+        if (bhi - blo) > (hi - lo):
+            print(f"    -> QUOTE THE SPEAKER INTERVAL. It is wider, so clip-level")
+            print(f"       independence was the optimistic assumption: these {len(dataset)}")
+            print(f"       mixtures really do come from only {len(distinct)} people.")
+        else:
+            print(f"    -> QUOTE WILSON. The speaker interval came out NARROWER, which means")
+            print(f"       between-speaker variation is smaller than ordinary binomial noise")
+            print(f"       -- a real finding about the data, but the narrower of two intervals")
+            print(f"       is never the conservative one. Report Wilson and say the speaker")
+            print(f"       bootstrap agreed, rather than quoting the tighter number.")
         print(f"  MAE ............. {rep['mae']:.3f}")
         print("\n" + format_confusion(np.array(rep["confusion"])))
         rep.update({"wilson95": [lo, hi], "speaker_bootstrap95": [blo, bhi]})
