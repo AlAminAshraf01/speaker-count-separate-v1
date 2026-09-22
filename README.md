@@ -9,6 +9,37 @@ comes out of measuring why v0's single multi-task network did both jobs badly.
 
 ---
 
+## Results
+
+Measured once on the frozen test set — 1,500 mixtures, 300 per speaker count, from 32 speakers
+held out of training. Real LibriSpeech via LibriMix, 8 kHz, fully overlapped.
+
+| | |
+|---|---|
+| **counting accuracy** | **91.1 %**  (95 % CI [89.5, 92.4]) |
+| MAE | **0.089** — and *every* error is off by exactly one |
+| **separation, SI-SDRi** | **+4.63 dB** (N1 +7.9 / N2 +6.2 / N3 +5.1 / N4 +4.4 / N5 +3.5) |
+| P-SI-SNR (the counter-sensitive score) | +3.81 dB |
+
+Against the floors: chance is 20.0 %, the 16-feature gradient-boosted tree reaches 57.8 %, and
+v0's 5.30 M-parameter joint model scored **20.00 %** — chance — on the same task.
+
+**Two findings worth more than the headline numbers.**
+
+*The counter was data-limited; the separator was not.* A dataloader bug froze dynamic mixing:
+`persistent_workers` handed each worker a snapshot, so `set_epoch` never reached them and every
+epoch re-rendered identical mixtures. Fixing it moved the counter **85.1 % → 90.6 %** and closed
+a 16-point train/validation gap to −0.8, while the separator moved **+4.51 → +4.59 dB**, which is
+noise. Same bug, same corpus, same GPU hours — one model was memorising a fixed set and the other
+never could. See `src/countsep/datasets.py::build_loader`, which now refuses the combination.
+
+*Mask overlap predicts separation quality within a fixed speaker count.* Pooled r = −0.668, and
+critically **within-N r = −0.569**, consistent at every N (−0.60, −0.55, −0.49, −0.63) — so it is
+not just N moving both variables. Mask *sparsity* does not survive that control: pooled −0.405
+collapses to +0.082 within N, a textbook Simpson's reversal.
+
+---
+
 ## The three numbers that produced this design
 
 | measured in v0 | |
