@@ -183,7 +183,28 @@ but the agreement is **not established**.
 
 ---
 
-## 8. GPU budget (Kaggle free tier, 30 h/week)
+## 8. One clip, end to end (notebook 05)
+
+`recipes_test.csv[300]`, two talkers, 3.0 s.
+
+| | |
+|---|---|
+| true count | 2 |
+| predicted count | **2** — correct |
+| counter confidence | **95.56 %** on N=2 (next: 2.91 % on N=3) |
+| slot power vs mixture | −31.6, −32.2 \| −34.2, −34.4, −35.8 dB |
+
+**The finding.** Every slot sits below the −30 dB silence target, and the two kept speakers are
+only ~2 dB above the spares. SI-SDR is scale-invariant, so the separation loss never asks for an
+output level, while the silence term pushes spare slots down; everything drifts to the floor.
+SI-SDRi is unaffected (it cannot see scale either), and slot selection still works — P-SI-SNR,
+which uses it, is +3.81 dB — but on a ~2 dB margin rather than the cliff the design assumed.
+Raw outputs are ~30 dB below the input, so the demo now writes the separated tracks at one
+shared boost and prints it. A level-matching loss term is the natural next step.
+
+---
+
+## 9. GPU budget (Kaggle free tier, 30 h/week)
 
 | notebook | accelerator | wall time | GPU-h |
 |---|---|---|---|

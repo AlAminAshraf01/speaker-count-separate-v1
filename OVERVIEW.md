@@ -59,7 +59,7 @@ anything. It ended up answering **"1 speaker"** to almost every clip, which scor
 Each model now gets 100% of its own training signal. It costs about 5% more computing power.
 Counting went from **20% to 91%**.
 
-*(See `report/figures/fig1_architecture.png`.)*
+![The two-model design](report/figures/fig1_architecture.png)
 
 ---
 
@@ -82,7 +82,13 @@ it is wrong, it says 3 when the answer is 4 — never 2, never 5. Out of 1,500 c
 one error bigger than a neighbour. The average error size is **0.089 speakers**, against 2.000 for
 the old version.
 
-*(See `report/figures/fig2_confusion_matrix.png`.)*
+![Counting accuracy against every baseline](report/figures/fig7_baselines.png)
+
+The grid below shows every one of the 1,500 test clips. Read a row as "the true answer was
+this" and a column as "the system said this". Everything sits on the diagonal or right
+next to it — nothing lands two squares away.
+
+![Confusion matrix](report/figures/fig2_confusion_matrix.png)
 
 ### Separation: **+4.63 dB improvement**
 
@@ -99,12 +105,12 @@ the mixture. Higher is better; 0 would mean we achieved nothing.
 
 More people = harder = smaller improvement. That is expected and it is the right shape.
 
+![Separation quality by number of talkers](report/figures/fig3_si_sdri_per_n.png)
+
 **Important for the report:** published research reports 14.76 dB, and we should *not* claim we
 fell short of it. That number is for a model that is **told** there are exactly 2 speakers, trained
 **200 epochs** on **six times more audio**. Ours handles 1–5 speakers, trained 30 epochs, on a free
 Kaggle account. Three different things — say so rather than apologising for a gap.
-
-*(See `report/figures/fig3_si_sdri_per_n.png`.)*
 
 ---
 
@@ -135,7 +141,69 @@ memorise from 12,000 examples. It was never limited by data — it is limited by
 This is a genuinely good experimental result: one variable changed, two models, opposite outcomes,
 and a measurable explanation for why. **It is worth a section in the report.**
 
-*(See `report/figures/fig4_dataloader_ablation.png` and `fig5_training_curves.png`.)*
+![One bug, two models](report/figures/fig4_dataloader_ablation.png)
+
+The training curves show *why*. In the left panel the dashed lines are training accuracy. For
+the first eight epochs the two runs are identical. Then the broken run (grey) keeps climbing on
+its training data — all the way to 99.5% — while its real score stalls. It is memorising
+answers instead of learning to count. The fixed run (blue) never does that: its training and
+real scores stay together. On the right, the separator's two runs lie almost on top of each
+other, which is what "this model was never short of data" looks like.
+
+![Training curves](report/figures/fig5_training_curves.png)
+
+---
+
+## What it looks like on a single clip
+
+Notebook 05 runs the whole system on one clip and lets you listen. This one is from the test
+set, with two people talking:
+
+![One real clip](report/figures/fig8_demo_clip.png)
+
+**Left — the counter.** It puts 95.6% of its confidence on "2", and 2 is correct. That is what
+a model that genuinely knows looks like: one tall bar, not a spread.
+
+**Right — something we did not expect.** The separator always produces 5 audio slots, and we
+keep the loudest N. The design assumed the real speakers would be loud and the spare slots
+would be pushed down to near-silence, leaving an obvious gap. Instead, **every slot is
+near-silent** — all five sit below the −30 dB silence line — and the two real speakers are only
+about 2 dB louder than the spares.
+
+The reason is a property of the scoring method. Separation quality is measured with
+**SI-SDR**, which is deliberately *scale-invariant*: it judges the *shape* of a sound wave and
+ignores how loud it is. Since the model is trained to maximise that score, nothing ever tells
+it to get the volume right — and a separate part of training pushes the spare slots quieter.
+With a push in one direction and nothing pushing back, everything drifts quiet.
+
+What this means in practice:
+
+- **The accuracy numbers are still correct.** They are scale-invariant too, so they measure
+  whether each voice was separated properly, which it was.
+- **The raw audio comes out very quiet**, about 30 dB below the input. The demo now boosts the
+  separated tracks by a single shared amount so you can hear them, and prints exactly how much.
+- **Choosing which slots are real is working on a thin margin** — 2 dB rather than a cliff. It
+  still works (the counter-sensitive score is positive), but it is worth one sentence in the
+  report, and it points at an obvious improvement: add a loss term that cares about volume.
+
+---
+
+## Looking inside the separator
+
+Why does separation get worse with more people? We measured how much the separator's internal
+"masks" — one per speaker — overlap with each other. More overlap means two speakers are
+fighting over the same parts of the sound.
+
+![Interpretability](report/figures/fig6_interpretability.png)
+
+**Left:** as more people talk, the masks overlap more, and separation gets worse — a clean
+straight-line relationship.
+
+**Right:** the careful part. Both overlap and quality change with the number of speakers, so a
+correlation between them could be a coincidence of that. So we checked *within* each speaker
+count separately. Overlap still predicts quality every time (blue bars, all negative). The
+other measure we tried, "sparsity", does not — it flips direction once you control for the
+number of speakers (orange). We report both.
 
 ---
 

@@ -147,30 +147,51 @@ def main() -> int:
         kept = "kept   " if k <= n_hat else "surplus"
         print(f"  slot {k}  {float(db):+7.1f} dB   {kept}")
 
-    # One gain for every file, so the tracks keep their relative loudness -- which is
-    # information. Normalising each track on its own would make a whisper and a shout
-    # come out identical.
+    # TWO gains, and the reason is worth knowing before you listen.
+    #
+    # The training loss is built on SI-SDR, which projects the estimate onto the reference
+    # and is therefore COMPLETELY scale-invariant: multiply an output by any constant and
+    # the score does not move. So nothing in training ever asks the separator to get its
+    # output LEVEL right, while the silence term actively pushes surplus slots down toward
+    # -30 dB. With a pull in one direction and nothing pulling back, every slot drifts to
+    # the floor -- measured on a real 2-speaker clip, all five slots came out between -31.6
+    # and -35.8 dB relative to the mixture, the kept speakers included.
+    #
+    # The separation numbers are unaffected (SI-SDRi cannot see scale, which is the whole
+    # point of the metric). The AUDIO is: a single shared gain referenced to the mixture
+    # would render the tracks ~30 dB down and essentially inaudible. So the mixture gets its
+    # own gain and the model's outputs share a second one, and the offset between them is
+    # printed rather than hidden.
     tracks = out.sources[0].cpu().numpy()
-    loudest = max(float(np.abs(wav).max()), float(np.abs(tracks[:n_hat]).max()), 1e-9)
-    gain = 0.9 / loudest
-    written = {"mixture.wav": wav}
+    model_out = {}
     for k in range(n_hat):
-        written[f"speaker_{k + 1:02d}.wav"] = tracks[k]
+        model_out[f"speaker_{k + 1:02d}.wav"] = tracks[k]
     if args.all_slots:
         for k in range(n_hat, len(tracks)):
-            written[f"surplus_{k + 1:02d}.wav"] = tracks[k]
+            model_out[f"surplus_{k + 1:02d}.wav"] = tracks[k]
     if out.noise is not None:
-        written["noise.wav"] = out.noise[0].cpu().numpy()
-    for name, data in written.items():
-        write_wav(os.path.join(out_dir, name), (data * gain).astype(np.float32), SR)
-    print(f"\n  {len(written)} files -> {out_dir}")
+        model_out["noise.wav"] = out.noise[0].cpu().numpy()
+
+    mix_gain = 0.9 / max(float(np.abs(wav).max()), 1e-9)
+    kept_peak = max((float(np.abs(tracks[k]).max()) for k in range(n_hat)), default=0.0)
+    out_gain = 0.9 / max(kept_peak, 1e-9)
+    write_wav(os.path.join(out_dir, "mixture.wav"), (wav * mix_gain).astype(np.float32), SR)
+    for name, data in model_out.items():
+        write_wav(os.path.join(out_dir, name), (data * out_gain).astype(np.float32), SR)
+
+    boost_db = 20.0 * np.log10(max(out_gain / max(mix_gain, 1e-12), 1e-12))
+    print(f"\n  {len(model_out) + 1} files -> {out_dir}")
+    print(f"  the separated tracks are written {boost_db:+.1f} dB louder than the mixture,")
+    print("  so they are audible. One gain is shared across them, so their levels relative")
+    print("  to EACH OTHER are untouched -- only the common offset changed.")
 
     report = {
         "code_version": code_version(), "source": source,
         "seconds": len(wav) / SR, "n_hat": n_hat, "true_n": truth,
         "count_probs": {str(n): float(probs[c]) for c, n in enumerate(N_LIST)},
         "slot_power_db": [float(v) for v in power],
-        "files": sorted(written),
+        "files": sorted(["mixture.wav", *model_out]),
+        "track_gain_over_mixture_db": float(boost_db),
     }
     path = os.path.join(out_dir, "infer_report.json")
     json_dump_atomic(report, path)

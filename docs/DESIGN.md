@@ -41,10 +41,23 @@ against the 0.5 it had and the 1.0 the v0 troubleshooting notes recommended.
                                        keep the N̂ loudest ┘ ──► estimated sources
 ```
 
-**Slot selection is by loudness**, which reads exactly what the loss optimised: the rectangular
-PIT loss pushes surplus slots toward −30 dB relative to the mixture, so real speakers are the
-loud slots. It also degrades gracefully — predicting 3 when the truth is 4 returns the three
-loudest real speakers rather than a scrambled set.
+**Slot selection is by loudness.** The intent was that the rectangular PIT loss pushes surplus
+slots toward −30 dB relative to the mixture, so real speakers would be the loud slots and the
+spares a clear cliff below them.
+
+**Measured, that is not what the trained separator does.** On a real two-speaker test clip all
+five slots came out between −31.6 and −35.8 dB — the kept speakers *below* the silence target
+too — with a step of about 2 dB between them and the spares instead of a cliff. The cause is
+structural: SI-SDR projects the estimate onto the reference, so the separation loss is
+completely scale-invariant and never asks for any particular output level, while the silence
+term pushes spare slots down. With a pull in one direction and nothing pulling back, every slot
+drifts to the floor.
+
+What survives: the SI-SDRi figures, which are scale-invariant by the same token and measure
+waveform shape correctly; and slot selection itself, which still works on its thinner margin —
+P-SI-SNR, the one score that uses loudness selection, is +3.81 dB. What does not: the claim that
+selection enjoys a wide margin. The obvious remedy is a level-matching term (plain SNR, or an
+energy target on kept slots) alongside SI-SDR; it is untested here.
 
 ---
 

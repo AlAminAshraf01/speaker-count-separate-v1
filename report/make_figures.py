@@ -297,6 +297,52 @@ def fig_baselines():
     save(fig, "fig7_baselines.png")
 
 
+# --------------------------------------------------------------------------- fig 8
+# One real clip from notebook 05: recipes_test.csv[300], two talkers.
+DEMO_PROBS = [0.0067, 0.9556, 0.0291, 0.0036, 0.0050]
+DEMO_SLOT_DB = [-31.63, -32.23, -34.21, -34.39, -35.84]
+DEMO_N_HAT = 2
+
+
+def fig_demo():
+    fig, axes = plt.subplots(1, 2, figsize=(9.6, 3.7))
+
+    ax = axes[0]
+    xs = np.arange(1, 6)
+    ax.bar(xs, [100 * p for p in DEMO_PROBS], width=0.6,
+           color=[BLUE if n == DEMO_N_HAT else GRID for n in xs], zorder=3)
+    ax.text(DEMO_N_HAT, 100 * DEMO_PROBS[DEMO_N_HAT - 1] + 2.5,
+            f"{100 * DEMO_PROBS[DEMO_N_HAT - 1]:.1f} %", ha="center", fontsize=10, color=INK)
+    ax.set_xticks(xs, [str(n) for n in xs]); ax.set_ylim(0, 108)
+    ax.set_xlabel("speaker count"); ax.set_ylabel("counter probability (%)")
+    ax.set_title("The counter: decisive and correct\ntrue count 2, predicted 2",
+                 fontsize=10.5, color=INK)
+    ax.xaxis.grid(False)
+
+    # Dots, not bars: dB relative to the mixture has no meaningful zero, so a bar's length
+    # would encode distance from an arbitrary axis limit. What matters is the vertical GAP
+    # between kept and surplus slots -- the "cliff" the design expected and did not get.
+    ax = axes[1]
+    ax.axhline(-30, linewidth=1.3, linestyle="--", color=INK2, zorder=2)
+    ax.text(5.4, -29.55, "silence target −30 dB", ha="right", fontsize=8.5, color=INK2)
+    ax.plot(xs, DEMO_SLOT_DB, linewidth=1.2, color=GRID, zorder=2)
+    ax.scatter(xs, DEMO_SLOT_DB, s=110, zorder=3, edgecolor=SURFACE, linewidth=2,
+               color=[ORANGE if n <= DEMO_N_HAT else "#a9a8a2" for n in xs])
+    for x, v in zip(xs, DEMO_SLOT_DB):
+        ax.annotate(f"{v:.1f}", (x, v), textcoords="offset points", xytext=(0, -17),
+                    ha="center", fontsize=8.5, color=INK)
+    ax.set_xticks(xs, [f"slot {n}" for n in xs])
+    ax.set_xlim(0.5, 5.5); ax.set_ylim(-38, -28)
+    ax.set_ylabel("slot power vs mixture (dB)")
+    ax.set_title("The separator: every slot sits at the floor\n"
+                 "kept slots (orange) are only ~2 dB above the rest",
+                 fontsize=10.5, color=INK)
+    ax.xaxis.grid(False)
+
+    fig.tight_layout()
+    save(fig, "fig8_demo_clip.png")
+
+
 if __name__ == "__main__":
     print("writing figures to", OUT)
     fig_architecture()
@@ -306,4 +352,5 @@ if __name__ == "__main__":
     fig_training()
     fig_interpretability()
     fig_baselines()
+    fig_demo()
     print("done")
