@@ -1,3 +1,4 @@
+<!-- Edited this file? Rebuild the PDF copy too: python tools/build_overview_pdf.py -->
 # What this project does — a guide for the team
 
 Read this first. It takes about five minutes and assumes you have not seen any of the code.
