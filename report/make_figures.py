@@ -65,9 +65,16 @@ SEP_FRESH = [0.70, 2.12, 2.62, 2.80, 2.83, 2.76, 3.10, 2.62, 3.11, 3.15,
              2.85, 3.37, 3.33, 3.39, 2.60, 3.50, 3.78, 3.50, 3.55, 4.13,
              4.17, 4.24, 4.31, 4.33, 4.48, 4.51, 4.55, 4.59, 4.59, 4.59]
 
-CNT_FRESH = [74.9, 61.8, 73.4, 72.4, 76.8, 80.4, 86.8, 84.1, 77.8, 84.8,
-             81.8, 88.1, 88.5, 90.3, 90.5, 89.7, 90.0, 90.5, 90.2, 90.6]
-CNT_FROZEN_BEST = 85.1        # full curve not in the retained logs -- see report/README.md
+# Counter, both runs. Validation and training accuracy per epoch (%).
+# Frozen-data figures read from that run's train_report.json (code_version 6de9a43).
+CNT_FRESH_VAL = [74.9, 61.8, 73.4, 72.4, 76.8, 80.4, 86.8, 84.1, 77.8, 84.8,
+                 81.8, 88.1, 88.5, 90.3, 90.5, 89.7, 90.0, 90.5, 90.2, 90.6]
+CNT_FRESH_TRAIN = [68.8, 78.6, 80.8, 82.9, 83.8, 84.9, 85.6, 86.2, 86.9, 87.4,
+                   87.7, 88.3, 88.5, 88.8, 89.1, 89.4, 89.5, 89.7, 89.9, 89.8]
+CNT_FROZEN_VAL = [73.33, 61.73, 74.20, 70.93, 81.40, 78.53, 79.67, 85.07, 83.60, 81.00,
+                  78.33, 78.27, 80.47, 79.80, 81.60, 82.20, 83.27, 83.53, 83.73, 83.27]
+CNT_FROZEN_TRAIN = [68.99, 78.73, 80.95, 82.99, 84.72, 86.36, 88.02, 89.72, 91.39, 93.13,
+                    94.51, 95.82, 96.79, 97.60, 98.28, 98.88, 99.25, 99.45, 99.44, 99.54]
 
 MASK_N = [2, 3, 4, 5]
 MASK_OVERLAP = [0.151, 0.211, 0.234, 0.266]
@@ -190,16 +197,26 @@ def fig_ablation():
 def fig_training():
     fig, axes = plt.subplots(1, 2, figsize=(10.0, 3.9))
 
+    # Training accuracy is the dashed pair. The two runs are indistinguishable for eight
+    # epochs, then the frozen-data run climbs to 99.5 % while its validation stalls: that
+    # divergence IS the memorisation, and it is the reason the fix was worth making.
+    ep = range(1, 21)
     ax = axes[0]
-    ax.plot(range(1, 21), CNT_FRESH, linewidth=2, color=BLUE, marker="o", markersize=4,
-            label="fresh mixtures", zorder=3)
-    ax.axhline(CNT_FROZEN_BEST, linewidth=1.6, linestyle="--", color=INK2,
-               label=f"frozen-data best ({CNT_FROZEN_BEST:.1f} %)")
-    ax.axhline(57.8, linewidth=1.4, linestyle=":", color=AQUA, label="Tier A tree (57.8 %)")
-    ax.set_xlabel("epoch"); ax.set_ylabel("dev accuracy (%)")
-    ax.set_ylim(55, 97); ax.set_xlim(0.5, 20.5)
+    ax.plot(ep, CNT_FROZEN_TRAIN, linewidth=1.3, linestyle="--", color="#b9b8b2", zorder=2)
+    ax.plot(ep, CNT_FRESH_TRAIN, linewidth=1.3, linestyle="--", color="#9fc4f0", zorder=2)
+    ax.plot(ep, CNT_FROZEN_VAL, linewidth=2, color=INK2, marker="o", markersize=3.5,
+            label="frozen data — dev", zorder=3)
+    ax.plot(ep, CNT_FRESH_VAL, linewidth=2, color=BLUE, marker="o", markersize=3.5,
+            label="fresh mixtures — dev", zorder=4)
+    ax.annotate("train 99.5 %", (20, CNT_FROZEN_TRAIN[-1]), textcoords="offset points",
+                xytext=(-6, 5), ha="right", fontsize=8, color="#8f8e88")
+    ax.annotate("train 89.8 %", (20, CNT_FRESH_TRAIN[-1]), textcoords="offset points",
+                xytext=(-6, -13), ha="right", fontsize=8, color="#7aa9e0")
+    ax.set_xlabel("epoch"); ax.set_ylabel("accuracy (%)")
+    ax.set_ylim(58, 104); ax.set_xlim(0.5, 20.5)
     ax.set_xticks([1, 5, 10, 15, 20])
-    ax.set_title("Counter", fontsize=11, color=INK, fontweight="bold")
+    ax.set_title("Counter  (dashed = training accuracy)",
+                 fontsize=10.5, color=INK, fontweight="bold")
     ax.legend(fontsize=8.5, loc="lower right", bbox_to_anchor=(1.0, 0.02),
               facecolor=SURFACE, framealpha=0.92, frameon=True, edgecolor="none")
 
