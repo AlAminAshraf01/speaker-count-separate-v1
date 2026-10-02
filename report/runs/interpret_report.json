@@ -1,0 +1,93 @@
+{
+  "code_version": "02d5a91 2026-09-28",
+  "separator": "/kaggle/input/notebooks/alaminashraf/kaggle-03-train-separator/sep/ckpt/best.pt",
+  "filterbank": {
+    "n_filters": 512,
+    "length": 16,
+    "peak_hz_quartiles": [
+      0.0,
+      1125.0,
+      2359.375,
+      3289.0625,
+      4000.0
+    ],
+    "fraction_below_1khz": 0.23046875,
+    "mel_fraction_below_1khz": 0.466796875
+  },
+  "mask_geometry": {
+    "1": {
+      "overlap_cosine": NaN,
+      "sparsity_hoyer": 0.8216733533854291,
+      "entropy": NaN,
+      "si_sdri": 8.22564766520279,
+      "n": 60
+    },
+    "2": {
+      "overlap_cosine": 0.15125666858224568,
+      "sparsity_hoyer": 0.8616984169719114,
+      "entropy": 0.004123434668163732,
+      "si_sdri": 6.447805745082097,
+      "n": 60
+    },
+    "3": {
+      "overlap_cosine": 0.21096952244424322,
+      "sparsity_hoyer": 0.865981444253249,
+      "entropy": 0.011325101665033437,
+      "si_sdri": 4.942478644759245,
+      "n": 60
+    },
+    "4": {
+      "overlap_cosine": 0.23421534072322878,
+      "sparsity_hoyer": 0.8627269013553944,
+      "entropy": 0.021358117329719557,
+      "si_sdri": 4.354972370275639,
+      "n": 60
+    },
+    "5": {
+      "overlap_cosine": 0.26565363422956834,
+      "sparsity_hoyer": 0.8618267432401562,
+      "entropy": 0.03181134335441106,
+      "si_sdri": 3.543729085257747,
+      "n": 60
+    }
+  },
+  "correlations": {
+    "overlap_cosine": {
+      "pearson_r": -0.6683972147335988,
+      "pearson_p": 1.9640171385576284e-32,
+      "spearman_r": -0.6749292522439624,
+      "spearman_p": 2.9023439642283544e-33,
+      "n": 240
+    },
+    "sparsity_hoyer": {
+      "pearson_r": -0.404956212522603,
+      "pearson_p": 1.9571228638602138e-12,
+      "spearman_r": 0.02293593696471394,
+      "spearman_p": 0.7028798335130033,
+      "n": 279
+    },
+    "entropy": {
+      "pearson_r": -0.5418115191412577,
+      "pearson_p": 1.0353198571134622e-19,
+      "spearman_r": -0.5748294241219465,
+      "spearman_p": 1.6591021992119632e-22,
+      "n": 240
+    }
+  },
+  "cross_model": {
+    "confidence_vs_si_sdri": {
+      "pearson_r": 0.2606536192901181,
+      "pearson_p": 1.0303338282618603e-05,
+      "spearman_r": 0.2913011526262861,
+      "spearman_p": 7.358845268547956e-07,
+      "n": 279
+    },
+    "confidence_vs_overlap": {
+      "pearson_r": -0.12173166721412912,
+      "pearson_p": 0.059697407035204,
+      "spearman_r": -0.19663622632337363,
+      "spearman_p": 0.002211119899041652,
+      "n": 240
+    }
+  }
+}

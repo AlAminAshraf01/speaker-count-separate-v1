@@ -1,0 +1,300 @@
+# The v1 design
+
+## The decision, in one paragraph
+
+v0 put counting and separation in one network and both jobs suffered. v1 splits them into two
+specialists, trains each with 100 % of its own gradient, and joins them at inference. The cost
+is about **5 % more compute**; the thing it buys is that each half can now be measured,
+debugged and improved independently — which v0 structurally could not do, because a bad
+end-to-end number there could not be attributed to either half. Everything else in this
+document follows from that one choice, or from a loss bug that the choice made visible.
+
+---
+
+## 1. Why two models and not one
+
+| measured in v0 | value |
+|---|---|
+| counting's share of the gradient into the shared trunk | **0.53 %** |
+| separation's share | 86.14 % |
+| ratio at the encoder | **633 : 1** |
+| cost of the auxiliary objectives to separation (single-batch ablation) | **−8.7 dB** |
+| pooled model, official Libri2Mix N=2 | 0.08 dB |
+| separation-only control, 8 epochs vs the pooled model's 38 | **5.49 dB** |
+| FLOPs saved by removing the separator from v0's model | only **8.4 %** |
+
+Read the last row together with the first. Sharing a trunk was saving 8.4 % of the compute while
+costing counting 99.5 % of its gradient and separation ~8.7 dB. That is not a trade-off worth
+making, and `w_count` could not have fixed it: reaching parity would have needed **O(100)**,
+against the 0.5 it had and the 1.0 the v0 troubleshooting notes recommended.
+
+**The architecture:**
+
+```
+                     ┌─────────────────────────────┐
+ 3 s @ 8 kHz  ──┬──► │ CountCRNN      0.49 M params│ ──► N̂ ∈ 1..5
+ RMS-normalised │    └─────────────────────────────┘
+                │    ┌─────────────────────────────┐
+                └──► │ SepNet         5.25 M params│ ──► 5 speaker slots + 1 noise slot
+                     └─────────────────────────────┘
+                                                          │
+                                       keep the N̂ loudest ┘ ──► estimated sources
+```
+
+**Slot selection is by loudness.** The intent was that the rectangular PIT loss pushes surplus
+slots toward −30 dB relative to the mixture, so real speakers would be the loud slots and the
+spares a clear cliff below them.
+
+**Measured, that is not what the trained separator does.** Every slot comes out 30–35 dB below
+the mixture, real talkers included, and loudness does not separate talkers from spares. The
+cause is structural: SI-SDR projects the estimate onto the reference, so the separation loss is
+completely scale-invariant and never asks for any particular output level, while the silence
+term pushes spare slots down. With a pull in one direction and nothing pulling back, every slot
+drifts to the floor, and a slot's level stops carrying information about what it holds.
+
+Scored on the whole test set (`06_evaluate.py` section 5, 2026-09-28), the loudest N slots are
+exactly the talkers in 96 % of N = 1 clips but only 13 / 18 / 28 % at N = 2 / 3 / 4; the median
+speaker-vs-spare gap over N = 1..4 is −1.16 dB, negative in 61 % of clips. Keeping the loudest
+slots turns the headline +4.63 dB (slots matched to the references) into **+3.65 dB** pooled,
+and +6.15 into +3.06 dB at N = 2. An earlier version of this section read a ~2 dB margin off one
+demo clip; on that clip the loudest slot was in fact a spare (RESULTS §8).
+
+What survives: the matched-slot SI-SDRi figures, which measure waveform shape correctly and say
+what the separator *can* produce. What does not: slot selection by loudness, for N ≥ 2. The
+obvious remedy is a level-matching term (plain SNR, or an energy target on kept slots) alongside
+SI-SDR, or a mixture-consistency projection that forces the slots to sum to the input — so that
+level carries information again — or selecting slots by a learned activity score instead of
+power. All need retraining and are untested here.
+
+What was done without retraining: inference now keeps the N slots whose least-squares
+combination, with the noise slot, best rebuilds the mixture (`select="rebuild"`,
+`countsep.metrics.consistent_slots`). It ignores level entirely. Adopted after a dev-split check
+fixed in advance (paired rebuild − loudest +0.61 dB, 95 % CI [+0.50, +0.72]), it gives **+4.06 dB**
+pooled on test and finds the talkers at N = 2 / 3 / 4 in 22 / 37 / 53 % of clips (RESULTS §4d).
+
+---
+
+## 2. The counter
+
+`countsep.counter.CountCRNN`, 0.49 M parameters. Linear-magnitude STFT (25 ms / 10 ms) → 2-D
+convs → BiGRU → **pooling** → 5-way softmax.
+
+**The pooling operator is the single most important choice**, worth 8 accuracy points — more
+than the architecture, the front end and the schedule combined. Changing *only* that layer,
+10 CPU epochs on identical speaker-disjoint data:
+
+> **These four rows are a synthetic speech proxy, not LibriSpeech.** They rank the operators
+> against each other, which is what they were run for, and the ranking is the claim. Their
+> absolute values are not comparable to the 57.8 % below, which is real audio. Notebook 02
+> replaces them.
+
+| pooling | params | accuracy | MAE |
+|---|---|---|---|
+| `meanstd` (what v0 used) | 0.508 M | 66.5 % | 0.396 |
+| `attentive` (Okabe et al.) | 0.525 M | 67.5 % | 0.422 |
+| `covariance` (log-Euclidean, 560-d) | 0.551 M | **20.0 % — collapsed** | 2.000 |
+| **`eigen`** (spectrum + effective rank, 65-d) — default | **0.488 M** | **74.4 %** | **0.305** |
+| *hand-crafted features + GBM, same proxy* | — | *69.3 %* | — |
+
+**The bar the counter actually has to clear is 57.8 %**, measured on real LibriSpeech by
+`03_tier_a.py` — speaker-grouped 5-fold, 7,500 mixtures, 201 talkers, MAE 0.480, fold spread
+±1.5 points, six of six grid configurations inside one point of each other. Notebook 02 reads
+that value out of `tier_a_report.json`; nothing is typed by hand.
+
+Two qualifications. The folds are grouped by each mixture's **first** speaker, so in an N > 1
+mixture the other talkers can sit on both sides of a fold — less optimistic than ungrouped
+folds, not fully speaker-disjoint. And it is cross-validation on **training** speakers, so it is
+not the same experiment as the counter's test accuracy; `06_evaluate.py --tier_a` scores the
+saved tree on the frozen test set for that comparison.
+
+**The rank hypothesis was right; the obvious implementation of it was wrong.** Both
+`covariance` and `eigen` read the same channel covariance. The full vectorisation hands the
+classifier 560 correlated dimensions and collapses to 20.0 % with MAE exactly 2.000 — the
+signature of answering "1 speaker" to everything, which is v0's failure reached by a different
+route. The eigenvalue spectrum hands it 65 and reaches 74.4 %.
+
+The difference is which part is nuisance. Eigen**vectors** say *which* directions the talkers
+occupy, and a counter should be invariant to that. Eigen**values** say *how many* directions
+carry energy — that is the count. Discarding the eigenvectors is the inductive bias, not a
+shortcut. `eigen` is also the smallest and fastest of the four.
+
+**How much to claim.** On the proxy, `eigen`'s 74.4 % and the tree's 69.3 % had Wilson
+intervals of [71.7, 76.9] and [66.5, 72.0] — overlapping by 0.3 points. On real audio both
+have since been measured: the `eigen` counter scores **91.07 %** on the frozen test set (Wilson
+[89.5, 92.4]) and the tree **57.8 %** in cross-validation — and **59.7 %** [57.2, 62.1] on the
+same 1,500 test clips, where an exact McNemar test gives 519 vs 48 discordant clips,
+p = 7 × 10⁻¹⁰¹. So the counter clearly beats the tree.
+
+What is still **not** established is the pooling ranking itself. `meanstd`, `attentive` and
+`covariance` were only ever trained on the proxy, so "eigen is the best pooling" rests on the
+proxy table above. The honest statement is that `eigen` was *chosen* on a proxy and *works* on
+real audio, not that it was shown best there. Closing that needs the pooling cells of notebook
+02 run on LibriSpeech, which is retraining and is listed as a limitation.
+
+Compare the counter and the tree with **McNemar** rather than by checking whether the
+intervals overlap. Both models score the identical clips, so the test is paired; overlapping
+intervals are too conservative for paired data and will call a real difference a tie.
+`06_evaluate.py` does this when `--tier_a` is given.
+
+---
+
+## 3. The separator
+
+`countsep.separator.SepNet`, 5.25 M parameters. Conv-TasNet (Luo & Mesgarani 2019, Table I) with
+`max_n_src = 5` speaker slots plus one noise slot, and **no count head**.
+
+Three repairs, all of which pushed v0 toward N=1-shaped solutions:
+
+**The clamp was backwards.** `soft_clamp` multiplied by the SI-SDR gradient (~10^(s/20)) peaks
+at the clamp point:
+
+| achieved SI-SDR | soft product | hard product |
+|---|---|---|
+| 0 dB | 0.999 | 1.000 |
+| 20 dB | 9.091 | 10.000 |
+| **30 dB (= τ)** | **15.811 ← peak** | **0.000** |
+| 40 dB | 9.091 | 0.000 |
+
+A 1-speaker mixture is solved by copying the input, so it lives in that band and carried ~16×
+the gradient of a hard 5-speaker one. `hard_clamp` is flat above τ: a solved example stops
+competing for the optimiser.
+
+*The noise slot was missed.* Its SI-SDR term kept `soft_clamp` after the speaker slots moved to
+`hard_clamp`, and the reported separator was trained that way. It is hard now too, with a
+regression test. Its effect on the reported run is unmeasured: the term carries weight
+`w_noise = 0.2` and no reported metric scores the noise slot, but its gradient does reach the
+shared encoder and TCN, so it is not strictly confined to that slot.
+
+**The silence term counted slots, not items.** Leftover slots run 4, 3, 2, 1, 0 for N = 1..5, so
+a balanced batch gave the N=1 item 40 % of the second-largest gradient term and the N=5 item
+nothing. Now a per-item average.
+
+**The normalisations were also 55 % of the memory.** The readable form of gLN --- subtract,
+divide, scale, shift --- retains *three* full-size tensors per call, and there are 49 of them.
+Measured at the paper preset and batch 12: **18.05 GiB** of saved activations against a
+**14.56 GiB** T4, of which gLN was **10.02 GiB**. The first real run OOMed in TCN block 19 of
+24 on the first batch. Because `mean`/`var` reduce over channels *and* time they are
+`(B, 1, 1)`, while `gamma`/`beta` are `(1, C, 1)`, so the whole affine folds into `(B, C, 1)`
+coefficients applied with one `addcmul` --- exact algebra, one full-size tensor instead of
+three. Activations fall to **11.33 GiB** (batch 12 fits with ~1.77 GiB spare, ceiling 13) and
+the forward gets *faster*, 30.6 -> 25.1 ms. Gradient checkpointing was measured as the
+alternative --- 11.7x less memory for +30 % compute --- and is not needed at this batch.
+
+**The normalisations defeated autocast.** `GlobalLayerNorm` is hand-written because Conv-TasNet
+normalises over channels *and* time, which `nn.LayerNorm` does not do — that part is legitimate.
+What was not is that autocast's fp32 promotion list covers `layer_norm` and not a hand-rolled
+equivalent, so v0's 49 instances opted out 49 times, with `eps = 1e-8` which is *exactly 0.0* in
+fp16. v1 computes the statistics in fp32 regardless and uses `MODEL_EPS = 1e-5`.
+
+---
+
+## 4. Data
+
+Full reasoning in [DATA.md](DATA.md). No corpus change: LibriSpeech plus dynamic mixing. The
+**settings** matter far more than the corpus, and they are chosen against measured costs:
+
+| setting | v0 | v1 | why |
+|---|---|---|---|
+| gain jitter | ±5 dB | **±2.5 dB** | ±5 dB cost 9 accuracy points |
+| SNR | 0–20 dB | **5–20 dB** | below 5 dB the noise drowns the cue |
+| babble noise | 20 % of clips | **removed** | babble *is* 4–8 talkers, so those labels were wrong |
+
+`01_make_frozen_sets.py` **refuses** to build an evaluation set that can draw babble. That is a
+correctness constraint, not a tuning knob.
+
+There are also **two epsilons**, and collapsing them is a mistake this project made and caught.
+`MODEL_EPS = 1e-5` guards torch divisions and must be fp16-representable; `EPS = 1e-12` guards
+float64 DSP. Using 1e-5 in the mixer leaves a residual level of −8.686e-05 dB at N=1 and
+−3.884e-05 dB at N=5 — monotone in N, above float32 resolution, and a depth-3 tree reads it at
+**39.2 %** against 20 % chance. The audit caught it within a minute. An epsilon is not a free
+parameter: too small for the working precision and it is zero, too large and it is signal.
+
+---
+
+## 5. Evaluation — four numbers, never one
+
+`06_evaluate.py` reports all of these, because a single score cannot describe a system that does
+two jobs and averaging them hides which half is broken:
+
+1. **Counting accuracy + the full confusion matrix + MAE.** The classes are ordinal; 3→4 is not
+   the failure 3→5 is.
+2. **P-SI-SNR over the whole test set** — stays defined when the count is wrong, so it cannot be
+   gamed by a system that refuses to commit.
+3. **SI-SDRi per N, count-correct subset only** — the row comparable to the fixed-N literature,
+   which is always told N.
+4. **SI-SDRi per N with the true count forced, over all clips** — separation given a perfect
+   counter.
+
+**Correction, measured 2026-09-21.** An earlier version of this document said the gap between
+3 and 4 is what miscounting costs. It is not. `06_evaluate.py` calls `usable_si_sdri` with the
+**true** count for both, and section 3 is a subset of section 4's own scores, so neither reads
+the counter. On the real run they differ by 0.07 dB, which is composition — section 3 drops the
+clips the counter missed and so carries a different mix of N — and per N the sign even reverses.
+**P-SI-SNR is the only number in the report that responds to the counter**, because it keeps
+`n_hat` slots the way inference does: +3.81 dB with the loudest, +4.23 dB with the rebuild slots
+inference uses now. It is also an *absolute* SI-SNR, not an
+improvement, so it must not be compared against the SI-SDRi rows.
+
+**And five more, added 2026-09-28.** Sections 3 and 4 let the references pick which of the 5
+slots to score (Hungarian matching over all of them), which inference cannot do, so they are an
+oracle-slot upper bound. `06_evaluate.py` now also reports: (5) SI-SDRi of the loudest-N slots
+the system actually keeps, the selection accuracy and the speaker-vs-spare gap; (6) macro
+averages over N, since the pooled rows weight sources and N = 5 dominates them; (7) everything
+by noise type and SNR band; (8) the Tier A tree on the same test clips with an exact McNemar
+test against the counter; (9) oracle IRM/IBM masks as an upper bound on spectral masking.
+Sections 1–4 were verified unchanged by the addition.
+
+**Intervals.** `pack.assign_roles` reserves 20 % of each split for babble, so LibriMix's
+251/40/40 become **201/32/32** usable target speakers. The 1,500 test mixtures are 1,500 draws
+from **32 people**. Report the Wilson interval *and* a speaker-level bootstrap over those 32
+clusters, say which is which, and quote the **wider** — the script decides and prints it. On the
+real run the bootstrap came out narrower ([89.9, 92.2] against Wilson's [89.5, 92.4]), so quote
+Wilson. Two caveats: the bootstrap clusters by each clip's first speaker only, and the 20 %
+babble reservation is never used (babble is refused), so it costs 50 training and 8 test
+speakers for nothing — worth undoing in any rebuild.
+
+**One measurement rule.** SI-SDRi is undefined for a clean single-speaker mixture: the mixture
+already *is* the target, so "improvement" measures EPS. `usable_si_sdri` drops those references
+and returns how many. In v0 that bug turned +1.2 dB into a reported −8.68 dB.
+
+---
+
+## 6. Budget and milestones
+
+| # | milestone | notebook | GPU cost | kill condition |
+|---|---|---|---|---|
+| M0 | pack the store, freeze dev/test | 00 | **0** | speaker disjointness ≠ 0 → stop |
+| M1 | audit + Tier A counting | 01 | **0** | artefact-strict probe above chance → the mitigation is broken |
+| M2 | train the counter | 02 | ~3 h | below the Tier A bar → report that, ship M1 |
+| M3 | train the separator | 03 | ~10 h | N=1 SI-SDRi poor → plumbing bug, not a model problem |
+| M4 | final evaluation + interpretability | 04 | ~0.3 h | — |
+| M5 | fixed-N=2 control *(optional)* | 03 | ~2.5 h | the only literature-comparable number |
+| M6 | the demo: one file in, one track per talker out | 05 | **0** | — |
+
+**~13.3 GPU-hours of 30/week.** M0 and M1 cost nothing and already produce a complete,
+defensible counting project — so if the quota runs out, the project does not.
+
+Cut order: M5, M3, M2. The project stays coherent at every step; it just narrows to counting.
+
+---
+
+## 7. The top risks
+
+| risk | mitigation |
+|---|---|
+| **Separation lands far below 14.76 dB** | It will — that number is 200 epochs on train-360. Report epochs and training set beside it. Run M5 for a comparable number. |
+| **The counter does not beat the 57.8 % tree** | That is a *result*, not a failure, and an interesting one. M1 already shipped. |
+| **fp16/fp32 divergence returns** | Preflight refuses to train on it; `tests/test_counter.py` and `tests/test_separator.py` assert it. |
+| **An audit that silently does nothing** | Scripts verify their own report file; a structural test fails the build on unreachable code. |
+| **4 vCPU cannot feed a T4** with on-the-fly mixing | The counter's batch is ~7× smaller than the separator's (`want="count"`). If the loader still starves the GPU, pre-render one epoch. |
+
+---
+
+## 8. What is deliberately *not* here
+
+- **No shared trunk.** §1 is the reason.
+- **No `w_count` on the separator.** It defaults to 0.0 and a separator has no count head.
+- **No `soft_clamp` in the training path.** Kept only so v0's behaviour stays reproducible.
+- **No babble noise anywhere.** Refused, not discouraged.
+- **No AMP by default.** The models are small; the ~30 % speed-up does not justify reopening the
+  failure mode that produced 44.9 % and 20.00 % from one checkpoint.

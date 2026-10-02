@@ -1,0 +1,87 @@
+{
+  "what": "notebook 04 dev slot-selection check (06_evaluate.py --test_split dev --no_oracle_masks --n_boot 200)",
+  "code_version": "bc59305 2026-09-28",
+  "source": "transcribed from the Kaggle log (section 10 + DEV verdict line); the eval_dev JSON itself was not kept",
+  "adoption_rule": "rebuild becomes the default only if the paired per-clip (rebuild - loudest) 95% CI is above zero on dev; fixed before the run",
+  "verdict": "ADOPT rebuild",
+  "per_n": {
+    "1": {
+      "oracle": 8.2,
+      "loudest": 8.11,
+      "rebuild": 8.2,
+      "projection": 8.15,
+      "right_loudest": 0.98,
+      "right_rebuild": 1.0,
+      "right_projection": 0.997
+    },
+    "2": {
+      "oracle": 6.22,
+      "loudest": 2.97,
+      "rebuild": 3.82,
+      "projection": 1.48,
+      "right_loudest": 0.123,
+      "right_rebuild": 0.253,
+      "right_projection": 0.0
+    },
+    "3": {
+      "oracle": 5.19,
+      "loudest": 3.56,
+      "rebuild": 4.59,
+      "projection": 1.55,
+      "right_loudest": 0.18,
+      "right_rebuild": 0.447,
+      "right_projection": 0.007
+    },
+    "4": {
+      "oracle": 4.1,
+      "loudest": 3.34,
+      "rebuild": 3.68,
+      "projection": 2.3,
+      "right_loudest": 0.293,
+      "right_rebuild": 0.417,
+      "right_projection": 0.027
+    },
+    "5": {
+      "oracle": 3.54,
+      "loudest": 3.54,
+      "rebuild": 3.54,
+      "projection": 3.54
+    }
+  },
+  "pooled": {
+    "oracle": 4.63,
+    "loudest": 3.65,
+    "rebuild": 4.07,
+    "projection": 2.76
+  },
+  "macro_n2to5": {
+    "oracle": 4.76,
+    "loudest": 3.35,
+    "rebuild": 3.91,
+    "projection": 2.22
+  },
+  "count_correct_pooled": {
+    "rebuild": 4.1,
+    "projection": 2.8
+  },
+  "paired_rebuild_minus_loudest": {
+    "mean": 0.61,
+    "ci95": [
+      0.5,
+      0.72
+    ],
+    "n_clips": 1130
+  },
+  "p_si_snr": {
+    "loudest": 3.67,
+    "rebuild": 4.09
+  },
+  "p_si_snr_rebuild_per_n": {
+    "1": 23.68,
+    "2": 2.83,
+    "3": 0.29,
+    "4": -2.85,
+    "5": -3.48
+  },
+  "noise_slot_used": true
+}
